@@ -1,0 +1,234 @@
+import { useCallback, useEffect, useRef, useState } from 'react';
+import * as THREE from 'three';
+import { useWebXR } from '../hooks/useWebXR';
+import { useHitTest } from '../hooks/useHitTest';
+import { useARMeasurement } from '../hooks/useARMeasurement';
+import { useXRCameraCapture } from '../hooks/useXRCameraCapture';
+import { useFrameAnalysisLoop } from '@/features/computer-vision/hooks/useFrameAnalysisLoop';
+import type { DetectedRisk } from '@/shared/types';
+
+interface WebXRSceneProps {
+  domOverlayRoot: HTMLElement | null;
+  onSessionEnd?: () => void;
+  // Live-CV opt-in. Requires the session to have been granted camera-access.
+  enableLiveScan?: boolean;
+  scanIntervalMs?: number;
+  onRisks?: (risks: DetectedRisk[]) => void;
+  onScanState?: (state: { isAnalyzing: boolean; cameraAccessAvailable: boolean }) => void;
+}
+
+export function WebXRScene({
+  domOverlayRoot,
+  onSessionEnd,
+  enableLiveScan = false,
+  scanIntervalMs = 2500,
+  onRisks,
+  onScanState,
+}: WebXRSceneProps) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
+  const sceneRef = useRef<THREE.Scene | null>(null);
+  const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
+  const reticleRef = useRef<THREE.Mesh | null>(null);
+  const pointMeshesRef = useRef<THREE.Mesh[]>([]);
+  const lineRef = useRef<THREE.Line | null>(null);
+  const currentFrameRef = useRef<XRFrame | null>(null);
+
+  const { isSupported, session, referenceSpace, startSession, endSession } = useWebXR();
+  const measurement = useARMeasurement();
+  const measurementRef = useRef(measurement);
+  measurementRef.current = measurement;
+
+  const [startError, setStartError] = useState<string | null>(null);
+
+  const getFrame = useCallback(() => currentFrameRef.current, []);
+  const latestHitRef = useHitTest({
+    session,
+    referenceSpace,
+    getFrame,
+    enabled: !!session,
+  });
+
+  const xrCapture = useXRCameraCapture({
+    rendererRef,
+    session,
+    refSpace: referenceSpace,
+  });
+
+  // The capture function the analysis loop calls. The XR animation loop
+  // fulfils each request on its next tick via xrCapture.tick(frame).
+  const liveScanState = useFrameAnalysisLoop(xrCapture.captureFn, {
+    enabled: enableLiveScan && !!session,
+    intervalMs: scanIntervalMs,
+  });
+
+  // Notify parent of risks + camera-access availability whenever they change.
+  useEffect(() => {
+    onRisks?.(liveScanState.risks);
+  }, [liveScanState.risks, onRisks]);
+
+  useEffect(() => {
+    onScanState?.({
+      isAnalyzing: liveScanState.isAnalyzing,
+      cameraAccessAvailable: xrCapture.isAvailable(),
+    });
+  }, [liveScanState.isAnalyzing, xrCapture, onScanState]);
+
+  // --- Scene setup ---
+  useEffect(() => {
+    if (!canvasRef.current) return;
+
+    const renderer = new THREE.WebGLRenderer({
+      canvas: canvasRef.current,
+      antialias: true,
+      alpha: true,
+    });
+    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.xr.enabled = true;
+
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 50);
+
+    const reticleGeom = new THREE.RingGeometry(0.07, 0.09, 32).rotateX(-Math.PI / 2);
+    const reticleMat = new THREE.MeshBasicMaterial({ color: 0xdc2626 });
+    const reticle = new THREE.Mesh(reticleGeom, reticleMat);
+    reticle.matrixAutoUpdate = false;
+    reticle.visible = false;
+    scene.add(reticle);
+
+    const lineMat = new THREE.LineBasicMaterial({ color: 0xdc2626 });
+    const lineGeom = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(),
+      new THREE.Vector3(),
+    ]);
+    const line = new THREE.Line(lineGeom, lineMat);
+    line.visible = false;
+    scene.add(line);
+
+    rendererRef.current = renderer;
+    sceneRef.current = scene;
+    cameraRef.current = camera;
+    reticleRef.current = reticle;
+    lineRef.current = line;
+
+    return () => {
+      pointMeshesRef.current.forEach((m) => {
+        m.geometry.dispose();
+        (m.material as THREE.Material).dispose();
+        scene.remove(m);
+      });
+      pointMeshesRef.current = [];
+      reticleGeom.dispose();
+      reticleMat.dispose();
+      lineGeom.dispose();
+      lineMat.dispose();
+      renderer.dispose();
+      rendererRef.current = null;
+      sceneRef.current = null;
+      cameraRef.current = null;
+      reticleRef.current = null;
+      lineRef.current = null;
+    };
+  }, []);
+
+  // --- Start the XR session ---
+  useEffect(() => {
+    if (!isSupported || !rendererRef.current || session) return;
+    let cancelled = false;
+    (async () => {
+      const s = await startSession({ domOverlayRoot });
+      if (cancelled || !s || !rendererRef.current) return;
+      try {
+        await rendererRef.current.xr.setSession(s);
+      } catch (err) {
+        console.error('renderer.xr.setSession failed:', err);
+        setStartError('Could not attach renderer to XR session.');
+        return;
+      }
+      s.addEventListener('end', () => onSessionEnd?.());
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isSupported, session, startSession, domOverlayRoot, onSessionEnd]);
+
+  // --- Render loop, reticle, select handler, XR capture tick ---
+  useEffect(() => {
+    const renderer = rendererRef.current;
+    const scene = sceneRef.current;
+    const camera = cameraRef.current;
+    const reticle = reticleRef.current;
+    const line = lineRef.current;
+    if (!renderer || !scene || !camera || !reticle || !line || !session) return;
+
+    const handleSelect = () => {
+      const hit = latestHitRef.current;
+      if (!hit) return;
+      const [x, y, z] = hit.position;
+
+      const pointGeom = new THREE.SphereGeometry(0.03, 16, 16);
+      const pointMat = new THREE.MeshBasicMaterial({ color: 0xdc2626 });
+      const pointMesh = new THREE.Mesh(pointGeom, pointMat);
+      pointMesh.position.set(x, y, z);
+      scene.add(pointMesh);
+      pointMeshesRef.current.push(pointMesh);
+
+      measurementRef.current.addPoint({ x, y, z });
+
+      const points = pointMeshesRef.current;
+      if (points.length >= 2) {
+        const a = points[points.length - 2].position;
+        const b = points[points.length - 1].position;
+        (line.geometry as THREE.BufferGeometry).setFromPoints([a, b]);
+        line.visible = true;
+      }
+    };
+    session.addEventListener('select', handleSelect);
+
+    renderer.setAnimationLoop((_, frame) => {
+      currentFrameRef.current = frame ?? null;
+
+      const hit = latestHitRef.current;
+      if (hit) {
+        reticle.visible = true;
+        reticle.matrix.fromArray(hit.matrix);
+      } else {
+        reticle.visible = false;
+      }
+
+      // Fulfil any pending XR camera capture request inside the frame.
+      if (frame) xrCapture.tick(frame);
+
+      renderer.render(scene, camera);
+    });
+
+    return () => {
+      session.removeEventListener('select', handleSelect);
+      renderer.setAnimationLoop(null);
+      currentFrameRef.current = null;
+    };
+  }, [session, latestHitRef, xrCapture]);
+
+  // End session on unmount
+  useEffect(() => {
+    return () => {
+      endSession();
+    };
+  }, [endSession]);
+
+  if (startError) {
+    return (
+      <div className="absolute inset-0 flex items-center justify-center bg-black/80 text-white p-4 text-center">
+        {startError}
+      </div>
+    );
+  }
+
+  return (
+    <canvas
+      ref={canvasRef}
+      className="absolute inset-0 w-full h-full"
+    />
+  );
+}

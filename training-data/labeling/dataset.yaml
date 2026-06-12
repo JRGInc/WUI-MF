@@ -1,0 +1,18 @@
+# Ultralytics YOLO-seg dataset. Fill train/val after splitting the
+# labeled set (e.g. 80/20). Labels go in a sibling labels/ dir, YOLO-seg
+# polygon format: <class> <x1> <y1> <x2> <y2> ... (normalized).
+path: /mnt/d/workspace/WebWUI/training-data/labeling
+train: images
+val: images
+names:
+  0: dry-dead-vegetation
+  1: ground-fuels
+  2: overhanging-vegetation
+  3: vegetation-near-structure
+  4: woodpile-lumber
+  5: propane-tank
+  6: wood-shake-roof
+  7: roof-debris
+  8: gutter-debris
+  9: combustible-fence
+  10: combustible-mulch

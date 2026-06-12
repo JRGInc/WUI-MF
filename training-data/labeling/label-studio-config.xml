@@ -1,0 +1,17 @@
+<View>
+  <Image name="image" value="$image" zoom="true" zoomControl="true" rotateControl="true"/>
+  <Header value="Suggested classes for this image: $hint"/>
+  <PolygonLabels name="label" toName="image" strokeWidth="2" pointSize="small">
+    <Label value="dry-dead-vegetation" background="#e6194b"/>
+    <Label value="ground-fuels" background="#3cb44b"/>
+    <Label value="overhanging-vegetation" background="#ffe119"/>
+    <Label value="vegetation-near-structure" background="#4363d8"/>
+    <Label value="woodpile-lumber" background="#f58231"/>
+    <Label value="propane-tank" background="#911eb4"/>
+    <Label value="wood-shake-roof" background="#46f0f0"/>
+    <Label value="roof-debris" background="#f032e6"/>
+    <Label value="gutter-debris" background="#bcf60c"/>
+    <Label value="combustible-fence" background="#fabebe"/>
+    <Label value="combustible-mulch" background="#008080"/>
+  </PolygonLabels>
+</View>

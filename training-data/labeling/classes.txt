@@ -1,0 +1,11 @@
+dry-dead-vegetation
+ground-fuels
+overhanging-vegetation
+vegetation-near-structure
+woodpile-lumber
+propane-tank
+wood-shake-roof
+roof-debris
+gutter-debris
+combustible-fence
+combustible-mulch

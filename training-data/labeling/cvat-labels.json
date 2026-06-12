@@ -1,0 +1,68 @@
+[
+  {
+    "name": "dry-dead-vegetation",
+    "color": "#e6194b",
+    "type": "polygon",
+    "attributes": []
+  },
+  {
+    "name": "ground-fuels",
+    "color": "#3cb44b",
+    "type": "polygon",
+    "attributes": []
+  },
+  {
+    "name": "overhanging-vegetation",
+    "color": "#ffe119",
+    "type": "polygon",
+    "attributes": []
+  },
+  {
+    "name": "vegetation-near-structure",
+    "color": "#4363d8",
+    "type": "polygon",
+    "attributes": []
+  },
+  {
+    "name": "woodpile-lumber",
+    "color": "#f58231",
+    "type": "polygon",
+    "attributes": []
+  },
+  {
+    "name": "propane-tank",
+    "color": "#911eb4",
+    "type": "polygon",
+    "attributes": []
+  },
+  {
+    "name": "wood-shake-roof",
+    "color": "#46f0f0",
+    "type": "polygon",
+    "attributes": []
+  },
+  {
+    "name": "roof-debris",
+    "color": "#f032e6",
+    "type": "polygon",
+    "attributes": []
+  },
+  {
+    "name": "gutter-debris",
+    "color": "#bcf60c",
+    "type": "polygon",
+    "attributes": []
+  },
+  {
+    "name": "combustible-fence",
+    "color": "#fabebe",
+    "type": "polygon",
+    "attributes": []
+  },
+  {
+    "name": "combustible-mulch",
+    "color": "#008080",
+    "type": "polygon",
+    "attributes": []
+  }
+]

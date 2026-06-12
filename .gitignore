@@ -1,0 +1,59 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Test coverage
+coverage
+
+# Playwright
+/test-results/
+/playwright-report/
+/playwright/.cache/
+
+# TypeScript
+*.tsbuildinfo
+
+# Field photos — real properties / PII, never commit
+BoisePhotos/
+
+# Training data: keep the text labeling configs/docs + the one CC example
+# image, but never the image byte-pools or the address-bearing harvest manifest.
+training-data/harvest/
+training-data/**/images/
+training-data/**/dropped/
+training-data/**/*.jpg
+training-data/**/*.jpeg
+training-data/**/*.png
+!training-data/labeling/examples/good-vs-loose-mask.png
+
+# Stray Windows redirect artifact (see CLAUDE.md)
+nul
+
+# Claude Code local (personal) settings
+.claude/settings.local.json
