@@ -56,6 +56,10 @@ export default function Dashboard() {
   useEffect(() => {
     if (user) {
       loadDashboardData();
+    } else {
+      // No authenticated user (e.g. signed out): don't sit on the spinner
+      // forever — fall through to the empty state.
+      setIsLoading(false);
     }
   }, [user]);
 

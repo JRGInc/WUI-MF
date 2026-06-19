@@ -4,6 +4,7 @@ import { AuthProvider } from './providers/AuthProvider';
 import { OfflineProvider } from './providers/OfflineProvider';
 import { ThemeProvider } from './providers/ThemeProvider';
 import { Layout } from '@/shared/components/Layout';
+import { ProtectedRoute } from '@/shared/components/ProtectedRoute';
 import { LoadingScreen } from '@/shared/components/LoadingScreen';
 import { ToastContainer } from '@/shared/components/ToastContainer';
 
@@ -32,19 +33,21 @@ function App() {
                 <Route path="/register" element={<Register />} />
 
                 {/* Protected routes with layout */}
-                <Route element={<Layout />}>
-                  <Route path="/" element={<Dashboard />} />
-                  <Route path="/assessment/new" element={<AssessmentWizard />} />
-                  <Route path="/assessment/:id" element={<AssessmentDetail />} />
-                  <Route path="/assessment/:id/edit" element={<AssessmentWizard />} />
-                  <Route path="/map" element={<RiskMap />} />
-                  <Route path="/map/:assessmentId" element={<RiskMap />} />
-                  <Route path="/ar" element={<ARViewer />} />
-                  <Route path="/ar/:assessmentId" element={<ARViewer />} />
-                  <Route path="/training" element={<TrainingHub />} />
-                  <Route path="/training/:courseId" element={<LessonViewer />} />
-                  <Route path="/training/:courseId/:lessonId" element={<LessonViewer />} />
-                  <Route path="/settings" element={<Settings />} />
+                <Route element={<ProtectedRoute />}>
+                  <Route element={<Layout />}>
+                    <Route path="/" element={<Dashboard />} />
+                    <Route path="/assessment/new" element={<AssessmentWizard />} />
+                    <Route path="/assessment/:id" element={<AssessmentDetail />} />
+                    <Route path="/assessment/:id/edit" element={<AssessmentWizard />} />
+                    <Route path="/map" element={<RiskMap />} />
+                    <Route path="/map/:assessmentId" element={<RiskMap />} />
+                    <Route path="/ar" element={<ARViewer />} />
+                    <Route path="/ar/:assessmentId" element={<ARViewer />} />
+                    <Route path="/training" element={<TrainingHub />} />
+                    <Route path="/training/:courseId" element={<LessonViewer />} />
+                    <Route path="/training/:courseId/:lessonId" element={<LessonViewer />} />
+                    <Route path="/settings" element={<Settings />} />
+                  </Route>
                 </Route>
 
                 {/* Shared report view (public with token) */}
