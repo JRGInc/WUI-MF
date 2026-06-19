@@ -9,6 +9,7 @@ import {
 } from '@heroicons/react/24/outline';
 import { useAuth } from '@/app/providers/AuthProvider';
 import { supabase } from '@/shared/services/supabaseClient';
+import { fromRow } from '@/shared/services/offlineStorage';
 import { trainingContent } from './content/trainingData';
 import type { TrainingCourse, TrainingProgress } from '@/shared/types';
 
@@ -33,8 +34,9 @@ export default function TrainingHub() {
 
       if (!error && data) {
         const progressMap: Record<string, TrainingProgress> = {};
-        data.forEach((p: { lesson_id: string }) => {
-          progressMap[p.lesson_id] = p as unknown as TrainingProgress;
+        data.forEach((p) => {
+          const mapped = fromRow<TrainingProgress>('training_progress', p);
+          progressMap[mapped.lessonId] = mapped;
         });
         setProgress(progressMap);
       } else {

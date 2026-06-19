@@ -8,7 +8,7 @@ import {
   PencilIcon,
 } from '@heroicons/react/24/outline';
 import { supabase } from '@/shared/services/supabaseClient';
-import { getLocalAssessment } from '@/shared/services/offlineStorage';
+import { getLocalAssessment, fromRow } from '@/shared/services/offlineStorage';
 import { LoadingSpinner } from '@/shared/components/LoadingScreen';
 import { ShareDialog } from '@/features/sharing/components/ShareDialog';
 import type { Assessment, Property, RiskLevel } from '@/shared/types';
@@ -57,7 +57,7 @@ export default function AssessmentDetail() {
           .single();
 
         if (sharedReport?.assessments) {
-          setAssessment(sharedReport.assessments as unknown as Assessment);
+          setAssessment(fromRow<Assessment>('assessments', sharedReport.assessments));
         }
       } else if (id) {
         // Try local first
@@ -73,9 +73,9 @@ export default function AssessmentDetail() {
             .single();
 
           if (data) {
-            setAssessment(data as unknown as Assessment);
+            setAssessment(fromRow<Assessment>('assessments', data));
             if (data.properties) {
-              setProperty(data.properties as unknown as Property);
+              setProperty(fromRow<Property>('properties', data.properties as Record<string, unknown>));
             }
           }
         }

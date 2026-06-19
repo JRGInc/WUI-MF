@@ -2,8 +2,10 @@ import Dexie, { Table } from 'dexie';
 import { v4 as uuidv4 } from 'uuid';
 import { supabase } from './supabaseClient';
 import type {
+  AnalyticsEvent,
   Assessment,
   AssessmentPhoto,
+  Finding,
   Property,
   SyncOperation,
   TrainingProgress,
@@ -20,6 +22,7 @@ class WildfireRiskDB extends Dexie {
   syncQueue!: Table<SyncOperation>;
   cachedModels!: Table<{ name: string; data: ArrayBuffer; version: string }>;
   cachedTrainingContent!: Table<{ id: string; content: unknown; cachedAt: string }>;
+  analyticsEvents!: Table<AnalyticsEvent & { localId?: number }>;
 
   constructor() {
     super('WildfireRiskDB');
@@ -39,6 +42,12 @@ class WildfireRiskDB extends Dexie {
     // not indexable) and hazardTags (multiEntry index for export queries).
     this.version(2).stores({
       photos: '++localId, id, assessmentId, category, syncStatus, *hazardTags',
+    });
+
+    // v3: first-party usage analytics — events buffered locally then flushed
+    // through the sync queue (same offline-first path as everything else).
+    this.version(3).stores({
+      analyticsEvents: '++localId, id, event, createdAt',
     });
   }
 }
@@ -84,6 +93,87 @@ export async function syncPendingOperations(): Promise<void> {
   }
 }
 
+// camelCase domain field → snake_case Supabase column, per table. The sync
+// queue stores domain objects (camelCase); Supabase columns are snake_case and
+// there is no automatic mapper, so we translate at the write boundary here.
+// Keys absent from a table's map pass through unchanged — that covers columns
+// whose names already match (id, address, status, completed) and JSON payload
+// columns (findings, recommendations, content, coordinates) whose nested keys
+// are stored as-is and cast back to the domain type on read.
+const COLUMN_MAPS: Record<string, Record<string, string>> = {
+  properties: {
+    userId: 'user_id',
+    parcelId: 'parcel_id',
+    createdAt: 'created_at',
+  },
+  assessments: {
+    propertyId: 'property_id',
+    overallScore: 'overall_score',
+    categoryScores: 'category_scores',
+    createdAt: 'created_at',
+    completedAt: 'completed_at',
+  },
+  map_annotations: {
+    assessmentId: 'assessment_id',
+    annotationType: 'annotation_type',
+    createdAt: 'created_at',
+  },
+  training_progress: {
+    userId: 'user_id',
+    lessonId: 'lesson_id',
+    quizScore: 'quiz_score',
+    completedAt: 'completed_at',
+  },
+  shared_reports: {
+    assessmentId: 'assessment_id',
+    shareType: 'share_type',
+    recipientEmail: 'recipient_email',
+    accessToken: 'access_token',
+    expiresAt: 'expires_at',
+    createdAt: 'created_at',
+  },
+  analytics_events: {
+    userId: 'user_id',
+    createdAt: 'created_at',
+  },
+};
+
+// Translate a camelCase domain record into a snake_case row for `table`.
+function toRow(table: string, data: Record<string, unknown>): Record<string, unknown> {
+  const map = COLUMN_MAPS[table];
+  if (!map) return data;
+  const row: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(data)) {
+    row[map[key] ?? key] = value;
+  }
+  return row;
+}
+
+// Inverse of COLUMN_MAPS (snake_case column → camelCase domain field).
+const REVERSE_COLUMN_MAPS: Record<string, Record<string, string>> = Object.fromEntries(
+  Object.entries(COLUMN_MAPS).map(([table, map]) => [
+    table,
+    Object.fromEntries(Object.entries(map).map(([camel, snake]) => [snake, camel])),
+  ])
+);
+
+// Translate a snake_case Supabase row into a camelCase domain object — the
+// inverse of toRow(), for use at read sites (`supabase.from(table).select()`).
+// Keys without a mapping pass through unchanged (id/status/etc. and the nested
+// objects from embedded joins, which the caller maps separately if needed).
+export function fromRow<T = Record<string, unknown>>(
+  table: string,
+  row: Record<string, unknown>
+): T {
+  const map = REVERSE_COLUMN_MAPS[table];
+  if (!map) return row as T;
+  const obj: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(row)) {
+    obj[map[key] ?? key] = value;
+  }
+  return obj as T;
+}
+
 async function executeSyncOperation(operation: SyncOperation): Promise<void> {
   const { type, table, recordId, data } = operation;
 
@@ -97,10 +187,10 @@ async function executeSyncOperation(operation: SyncOperation): Promise<void> {
 
   switch (type) {
     case 'create':
-      await supabase.from(table).insert(data as Record<string, unknown>);
+      await supabase.from(table).insert(toRow(table, data as Record<string, unknown>));
       break;
     case 'update':
-      await supabase.from(table).update(data as Record<string, unknown>).eq('id', recordId);
+      await supabase.from(table).update(toRow(table, data as Record<string, unknown>)).eq('id', recordId);
       break;
     case 'delete':
       await supabase.from(table).delete().eq('id', recordId);
@@ -163,6 +253,41 @@ export async function getLocalAssessment(id: string): Promise<Assessment | undef
 
 export async function getLocalAssessments(propertyId: string): Promise<Assessment[]> {
   return db.assessments.where('propertyId').equals(propertyId).toArray();
+}
+
+// Append a finding to an assessment's findings array. Offline-first: if the
+// assessment lives in Dexie, update it locally and queue the sync; otherwise
+// (it was created online and only exists in Supabase) read-modify-write the row
+// directly. Used by the AR viewer to persist a captured hazard.
+export async function addFindingToAssessment(
+  assessmentId: string,
+  finding: Finding
+): Promise<void> {
+  const local = await db.assessments.where('id').equals(assessmentId).first();
+  if (local) {
+    const findings = [...(local.findings ?? []), finding];
+    await db.assessments.update(local.localId!, { findings });
+    await queueSyncOperation({
+      type: 'update',
+      table: 'assessments',
+      recordId: assessmentId,
+      data: { findings },
+    });
+    return;
+  }
+
+  const { data, error } = await supabase
+    .from('assessments')
+    .select('findings')
+    .eq('id', assessmentId)
+    .single();
+  if (error) throw error;
+  const findings = [...(((data?.findings as Finding[] | null) ?? [])), finding];
+  const { error: updateError } = await supabase
+    .from('assessments')
+    .update({ findings })
+    .eq('id', assessmentId);
+  if (updateError) throw updateError;
 }
 
 // Photo operations

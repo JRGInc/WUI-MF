@@ -3,7 +3,7 @@ import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '@/shared/services/supabaseClient';
 
 // Development mode flag - set to true to bypass authentication
-const DEV_MODE = true;
+const DEV_MODE = false;
 
 // Mock user for development
 const MOCK_USER: User = {

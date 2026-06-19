@@ -10,6 +10,7 @@ import {
 } from '@heroicons/react/24/outline';
 import { useAuth } from '@/app/providers/AuthProvider';
 import { supabase } from '@/shared/services/supabaseClient';
+import { fromRow } from '@/shared/services/offlineStorage';
 import { LoadingSpinner } from '@/shared/components/LoadingScreen';
 import type { Assessment, Property, RiskLevel } from '@/shared/types';
 
@@ -69,7 +70,7 @@ export default function Dashboard() {
         .order('created_at', { ascending: false });
 
       if (!propError && propertiesData) {
-        setProperties(propertiesData as unknown as Property[]);
+        setProperties(propertiesData.map((r) => fromRow<Property>('properties', r)));
       }
 
       const { data: assessmentsData, error: assError } = await supabase
@@ -80,17 +81,18 @@ export default function Dashboard() {
         .limit(5);
 
       if (!assError && assessmentsData) {
-        setRecentAssessments(assessmentsData as unknown as Assessment[]);
+        const assessments = assessmentsData.map((r) => fromRow<Assessment>('assessments', r));
+        setRecentAssessments(assessments);
 
         // Calculate stats
-        const completed = assessmentsData.filter((a: { status: string }) => a.status === 'completed');
-        const totalScore = completed.reduce((sum: number, a: { overall_score?: number }) => sum + (a.overall_score || 0), 0);
+        const completed = assessments.filter((a) => a.status === 'completed');
+        const totalScore = completed.reduce((sum, a) => sum + (a.overallScore || 0), 0);
 
         setStats({
-          totalAssessments: assessmentsData.length,
+          totalAssessments: assessments.length,
           completedAssessments: completed.length,
           averageRiskScore: completed.length > 0 ? totalScore / completed.length : 0,
-          pendingActions: assessmentsData.filter((a: { status: string }) => a.status === 'in_progress').length,
+          pendingActions: assessments.filter((a) => a.status === 'in_progress').length,
         });
       } else {
         // Use demo data if Supabase is not configured
