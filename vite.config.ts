@@ -144,12 +144,13 @@ export default defineConfig({
     target: 'esnext',
     rollupOptions: {
       output: {
-        manualChunks: {
-          'tensorflow': ['@tensorflow/tfjs'],
-          'mapbox': ['mapbox-gl'],
-          'three': ['three'],
-          'segmenter': ['./src/features/computer-vision/services/vegetationSegmenter'],
-          'vendor': ['react', 'react-dom', 'react-router-dom', 'zustand']
+        // Vite 8 / Rolldown only accepts the function form of manualChunks.
+        manualChunks(id) {
+          if (id.includes('@tensorflow/tfjs')) return 'tensorflow';
+          if (id.includes('mapbox-gl')) return 'mapbox';
+          if (id.includes('three')) return 'three';
+          if (id.includes('vegetationSegmenter')) return 'segmenter';
+          if (/node_modules\/(react|react-dom|react-router-dom|zustand)\//.test(id)) return 'vendor';
         }
       }
     }
