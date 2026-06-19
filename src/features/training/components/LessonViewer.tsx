@@ -7,6 +7,8 @@ import {
 } from '@heroicons/react/24/outline';
 import { useAuth } from '@/app/providers/AuthProvider';
 import { supabase } from '@/shared/services/supabaseClient';
+import { fromRow } from '@/shared/services/offlineStorage';
+import { track } from '@/shared/services/analytics';
 import { showSuccessToast } from '@/shared/stores/toastStore';
 import { trainingContent } from '../content/trainingData';
 import { QuizComponent } from './QuizComponent';
@@ -46,8 +48,9 @@ export default function LessonViewer() {
 
       if (!error && data) {
         const progressMap: Record<string, TrainingProgress> = {};
-        data.forEach((p: { lesson_id: string }) => {
-          progressMap[p.lesson_id] = p as unknown as TrainingProgress;
+        data.forEach((p) => {
+          const mapped = fromRow<TrainingProgress>('training_progress', p);
+          progressMap[mapped.lessonId] = mapped;
         });
         setProgress(progressMap);
       }
@@ -84,6 +87,12 @@ export default function LessonViewer() {
         completedAt: new Date().toISOString(),
       },
     }));
+
+    void track('training_lesson_completed', {
+      lessonId: currentLesson.id,
+      courseId,
+      quizScore,
+    });
 
     showSuccessToast('Lesson completed!');
     setShowQuiz(false);
@@ -187,7 +196,7 @@ export default function LessonViewer() {
                         .replace(/^## (.*$)/gim, '<h2>$1</h2>')
                         .replace(/^### (.*$)/gim, '<h3>$1</h3>')
                         .replace(/^\*\*(.*)\*\*/gim, '<strong>$1</strong>')
-                        .replace(/^\- (.*$)/gim, '<li>$1</li>')
+                        .replace(/^- (.*$)/gim, '<li>$1</li>')
                         .replace(/\n\n/g, '</p><p>')
                         .replace(/\n/g, '<br />'),
                     }}

@@ -9,19 +9,35 @@ import {
   EyeIcon,
   EyeSlashIcon,
 } from '@heroicons/react/24/outline';
+import { v4 as uuidv4 } from 'uuid';
 import { useWebXR } from '../hooks/useWebXR';
 import { WebXRScene } from './WebXRScene';
 import { CameraFallback } from './CameraFallback';
 import { RiskAnnotation } from './RiskAnnotation';
 import { useLiveFrameAnalysis } from '@/features/computer-vision/hooks/useLiveFrameAnalysis';
-import type { DetectedRisk } from '@/shared/types';
+import { addFindingToAssessment } from '@/shared/services/offlineStorage';
+import { track } from '@/shared/services/analytics';
+import { showSuccessToast, showErrorToast } from '@/shared/stores/toastStore';
+import type { DetectedRisk, Finding, RiskCategory } from '@/shared/types';
 
 type ARMode = 'camera-overlay' | '3d-model' | 'measurement';
 
 const SCAN_INTERVAL_MS = 2500;
 
+// Best-effort map from a CV detection's free-form `type` to a risk category for
+// the persisted Finding. Defaults to vegetation (the dominant detector class).
+function detectedRiskToCategory(type: string): RiskCategory {
+  const t = type.toLowerCase();
+  if (t.includes('roof') || t.includes('gutter') || t.includes('shake')) return 'roof-structure';
+  if (t.includes('ember')) return 'ember-intrusion';
+  if (t.includes('access') || t.includes('road') || t.includes('evac')) return 'access-evacuation';
+  if (t.includes('water')) return 'water-supply';
+  if (t.includes('clearance') || t.includes('defensible') || t.includes('structure')) return 'defensible-space';
+  return 'vegetation';
+}
+
 export default function ARViewer() {
-  const { assessmentId: _assessmentId } = useParams();
+  const { assessmentId } = useParams();
   const overlayRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
 
@@ -66,6 +82,47 @@ export default function ARViewer() {
     [annotations]
   );
 
+  // Persist an AR-detected hazard as a durable Finding (when launched from an
+  // assessment) and record a usage event either way. Then dismiss it so the
+  // same detection isn't captured twice.
+  const handleCaptureAnnotation = useCallback(
+    async (index: number) => {
+      const target = annotations[index];
+      if (!target) return;
+
+      const category = detectedRiskToCategory(target.type);
+      void track('ar_mitigation_identified', {
+        type: target.type,
+        category,
+        severity: target.severity,
+        confidence: target.confidence,
+        hasAssessment: !!assessmentId,
+      });
+
+      if (assessmentId) {
+        const finding: Finding = {
+          id: uuidv4(),
+          category,
+          severity: target.severity,
+          title: target.type,
+          description: target.description,
+        };
+        try {
+          await addFindingToAssessment(assessmentId, finding);
+          showSuccessToast('Saved to assessment', `${target.type} added as a finding.`);
+        } catch (error) {
+          console.error('Failed to save AR finding:', error);
+          showErrorToast('Could not save finding', 'It was recorded but not attached to the assessment.');
+        }
+      } else {
+        showSuccessToast('Hazard recorded', 'Open AR from an assessment to save it as a finding.');
+      }
+
+      setDismissed((prev) => new Set(prev).add(riskKey(target)));
+    },
+    [annotations, assessmentId]
+  );
+
   const handleClearAll = useCallback(() => {
     setDismissed(new Set(sourceRisks.map(riskKey)));
   }, [sourceRisks]);
@@ -108,6 +165,7 @@ export default function ARViewer() {
           <RiskAnnotation
             key={`${riskKey(annotation)}-${index}`}
             annotation={annotation}
+            onCapture={() => handleCaptureAnnotation(index)}
             onRemove={() => handleRemoveAnnotation(index)}
           />
         ))}

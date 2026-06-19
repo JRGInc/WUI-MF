@@ -15,6 +15,7 @@ import {
   getLocalProperties,
 } from '@/shared/services/offlineStorage';
 import { showErrorToast, showSuccessToast } from '@/shared/stores/toastStore';
+import { track } from '@/shared/services/analytics';
 import { useMapLayers } from '../hooks/useMapLayers';
 import { useUserLocation } from '../hooks/useUserLocation';
 import { PropertyMarker } from './PropertyMarker';
@@ -92,41 +93,10 @@ export default function RiskMap({
   const hasExplicitCenter =
     !!initialCenter || !!assessmentId || searchParams.has('lat') || searchParams.has('lng');
 
-  // Show message if no Mapbox token
-  if (!MAPBOX_TOKEN) {
-    return (
-      <div className="h-[calc(100vh-12rem)] min-h-[500px] rounded-lg overflow-hidden bg-gray-100 dark:bg-gray-800 flex items-center justify-center">
-        <div className="text-center p-8 max-w-md">
-          <MapPinIcon className="w-16 h-16 mx-auto text-gray-400 mb-4" />
-          <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">
-            Map Not Configured
-          </h2>
-          <p className="text-gray-600 dark:text-gray-400 mb-4">
-            To use the interactive map, you need to add a Mapbox access token.
-          </p>
-          <div className="bg-gray-200 dark:bg-gray-700 rounded-lg p-4 text-left">
-            <p className="text-sm text-gray-700 dark:text-gray-300 mb-2">
-              1. Get a free token at{' '}
-              <a
-                href="https://mapbox.com"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-fire-600 hover:underline"
-              >
-                mapbox.com
-              </a>
-            </p>
-            <p className="text-sm text-gray-700 dark:text-gray-300 mb-2">
-              2. Create a <code className="bg-gray-300 dark:bg-gray-600 px-1 rounded">.env</code> file in the project root
-            </p>
-            <p className="text-sm text-gray-700 dark:text-gray-300">
-              3. Add: <code className="bg-gray-300 dark:bg-gray-600 px-1 rounded">VITE_MAPBOX_TOKEN=your_token</code>
-            </p>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  // Count one "map opened" per mount (only when the map is actually usable).
+  useEffect(() => {
+    if (MAPBOX_TOKEN) void track('map_opened');
+  }, []);
 
   // Initialize map
   useEffect(() => {
@@ -481,6 +451,44 @@ export default function RiskMap({
       />
     ));
   }, [propertyMarkers, mapLoaded, focusProperty]);
+
+  // Show message if no Mapbox token. Placed after all hooks so hook order stays
+  // constant across renders (Rules of Hooks); the map container isn't rendered
+  // in this branch, so the init effect above bails on its null-container guard.
+  if (!MAPBOX_TOKEN) {
+    return (
+      <div className="h-[calc(100vh-12rem)] min-h-[500px] rounded-lg overflow-hidden bg-gray-100 dark:bg-gray-800 flex items-center justify-center">
+        <div className="text-center p-8 max-w-md">
+          <MapPinIcon className="w-16 h-16 mx-auto text-gray-400 mb-4" />
+          <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">
+            Map Not Configured
+          </h2>
+          <p className="text-gray-600 dark:text-gray-400 mb-4">
+            To use the interactive map, you need to add a Mapbox access token.
+          </p>
+          <div className="bg-gray-200 dark:bg-gray-700 rounded-lg p-4 text-left">
+            <p className="text-sm text-gray-700 dark:text-gray-300 mb-2">
+              1. Get a free token at{' '}
+              <a
+                href="https://mapbox.com"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-fire-600 hover:underline"
+              >
+                mapbox.com
+              </a>
+            </p>
+            <p className="text-sm text-gray-700 dark:text-gray-300 mb-2">
+              2. Create a <code className="bg-gray-300 dark:bg-gray-600 px-1 rounded">.env</code> file in the project root
+            </p>
+            <p className="text-sm text-gray-700 dark:text-gray-300">
+              3. Add: <code className="bg-gray-300 dark:bg-gray-600 px-1 rounded">VITE_MAPBOX_TOKEN=your_token</code>
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="relative h-[calc(100vh-12rem)] min-h-[500px] rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700">

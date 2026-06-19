@@ -19,6 +19,7 @@ import {
   savePropertyLocally,
 } from '@/shared/services/offlineStorage';
 import { supabase } from '@/shared/services/supabaseClient';
+import { track } from '@/shared/services/analytics';
 import { showSuccessToast, showErrorToast } from '@/shared/stores/toastStore';
 import { PropertyInfoStep } from './components/PropertyInfoStep';
 import { PhotoCaptureStep } from './components/PhotoCaptureStep';
@@ -192,6 +193,13 @@ export default function AssessmentWizard() {
         // Fire-and-forget: photo upload shouldn't block assessment completion.
         syncNow().catch((err) => console.error('Photo sync failed:', err));
       }
+
+      void track('assessment_completed', {
+        assessmentId,
+        overallScore: assessment.overallScore,
+        findingCount: assessment.findings.length,
+        photoCount: wizardData.photos.length,
+      });
 
       showSuccessToast('Assessment completed', 'Your assessment has been saved successfully.');
       navigate(`/assessment/${assessmentId}`);

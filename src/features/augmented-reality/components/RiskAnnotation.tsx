@@ -1,10 +1,15 @@
 import { useState } from 'react';
-import { XMarkIcon, ExclamationTriangleIcon } from '@heroicons/react/24/outline';
+import {
+  XMarkIcon,
+  ExclamationTriangleIcon,
+  BookmarkIcon,
+} from '@heroicons/react/24/outline';
 import type { DetectedRisk, RiskLevel } from '@/shared/types';
 
 interface RiskAnnotationProps {
   annotation: DetectedRisk;
   onRemove?: () => void;
+  onCapture?: () => void;
 }
 
 function getSeverityColor(severity: RiskLevel): string {
@@ -33,7 +38,7 @@ function getSeverityBorder(severity: RiskLevel): string {
   }
 }
 
-export function RiskAnnotation({ annotation, onRemove }: RiskAnnotationProps) {
+export function RiskAnnotation({ annotation, onRemove, onCapture }: RiskAnnotationProps) {
   const [isExpanded, setIsExpanded] = useState(false);
 
   if (!annotation.boundingBox) return null;
@@ -83,6 +88,19 @@ export function RiskAnnotation({ annotation, onRemove }: RiskAnnotationProps) {
           <span className="opacity-70">({Math.round(annotation.confidence * 100)}%)</span>
         </div>
 
+        {onCapture && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onCapture();
+            }}
+            className="p-1 rounded bg-black/50 text-white/70 hover:text-white"
+            title="Save as finding"
+          >
+            <BookmarkIcon className="w-3 h-3" />
+          </button>
+        )}
+
         {onRemove && (
           <button
             onClick={(e) => {
@@ -90,6 +108,7 @@ export function RiskAnnotation({ annotation, onRemove }: RiskAnnotationProps) {
               onRemove();
             }}
             className="p-1 rounded bg-black/50 text-white/70 hover:text-white"
+            title="Dismiss"
           >
             <XMarkIcon className="w-3 h-3" />
           </button>

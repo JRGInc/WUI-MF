@@ -271,6 +271,16 @@ export interface SharedReport {
 
 export type ShareType = 'link' | 'agency' | 'insurance';
 
+// Analytics Types — first-party, privacy-preserving usage events. `properties`
+// must stay PII-free (enums/ids/counts only — no addresses, coords, or names).
+export interface AnalyticsEvent {
+  id: string;
+  userId: string | null;
+  event: string;
+  properties?: Record<string, unknown>;
+  createdAt: string;
+}
+
 // Offline/Sync Types
 export interface SyncOperation {
   id: string;
