@@ -1,6 +1,6 @@
 import Dexie, { Table } from 'dexie';
 import { v4 as uuidv4 } from 'uuid';
-import { supabase } from './supabaseClient';
+import { supabase, getPhotoUrl } from './supabaseClient';
 import { upsertByDomainId } from './syncUpsert';
 import type {
   AnalyticsEvent,
@@ -451,6 +451,19 @@ export async function savePhotoLocally(
   });
 
   return localId;
+}
+
+// Resolve a displayable URL for a photo. A local blob (just-captured or not yet
+// synced) yields an object URL; otherwise we fall back to the Supabase Storage
+// public URL from storagePath — which is how pulled/synced photos render after
+// their blob has been cleared. `isObjectUrl` tells the caller to revoke it.
+export function photoDisplayUrl(
+  photo: AssessmentPhoto & { blob?: Blob }
+): { url: string; isObjectUrl: boolean } | null {
+  const blob = photo.localBlob ?? photo.blob;
+  if (blob) return { url: URL.createObjectURL(blob), isObjectUrl: true };
+  if (photo.storagePath) return { url: getPhotoUrl(photo.storagePath), isObjectUrl: false };
+  return null;
 }
 
 export async function getLocalPhotos(assessmentId: string): Promise<AssessmentPhoto[]> {

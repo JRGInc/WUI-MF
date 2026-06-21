@@ -9,6 +9,7 @@ import {
 } from '@heroicons/react/24/outline';
 import { supabase } from '@/shared/services/supabaseClient';
 import { getLocalAssessment, fromRow } from '@/shared/services/offlineStorage';
+import { PhotoGallery } from './components/PhotoGallery';
 import { LoadingSpinner } from '@/shared/components/LoadingScreen';
 import { ShareDialog } from '@/features/sharing/components/ShareDialog';
 import type { Assessment, Property, RiskLevel } from '@/shared/types';
@@ -313,6 +314,9 @@ export default function AssessmentDetail() {
           </ul>
         </div>
       )}
+
+      {/* Photos */}
+      <PhotoGallery assessmentId={assessment.id} />
 
       {/* Metadata */}
       <div className="text-sm text-gray-500 dark:text-gray-400 text-center">
