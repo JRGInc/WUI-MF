@@ -119,6 +119,16 @@ const COLUMN_MAPS: Record<string, Record<string, string>> = {
     annotationType: 'annotation_type',
     createdAt: 'created_at',
   },
+  // Photos are written via syncPhoto (manual mapping); this map is for reads
+  // (pull/fromRow). Mirrors the columns syncPhoto inserts.
+  assessment_photos: {
+    assessmentId: 'assessment_id',
+    storagePath: 'storage_path',
+    analysisResults: 'analysis_results',
+    capturedAt: 'captured_at',
+    trainingConsent: 'training_consent',
+    hazardTags: 'hazard_tags',
+  },
   training_progress: {
     userId: 'user_id',
     lessonId: 'lesson_id',
@@ -246,7 +256,37 @@ export async function pullRemoteData(userId: string): Promise<void> {
       fromRow<MapAnnotation>('map_annotations', r as Record<string, unknown>)
     );
     await upsertByDomainId(db.annotations, annotations, dirty);
+
+    // Photos: pull metadata only (blobs live in Storage and are cleared after
+    // upload; display falls back to the remote URL via storagePath). Mark synced.
+    const { data: photoRows, error: photoErr } = await supabase
+      .from('assessment_photos')
+      .select('*')
+      .in('assessment_id', assessmentIds);
+    if (photoErr) throw photoErr;
+    const photos = (photoRows ?? []).map((r) => ({
+      ...fromRow<AssessmentPhoto>('assessment_photos', r as Record<string, unknown>),
+      syncStatus: 'synced' as const,
+    }));
+    // db.photos carries an extra blob field; the upsert only touches id/localId.
+    await upsertByDomainId(
+      db.photos as unknown as Table<AssessmentPhoto & { localId?: string }>,
+      photos,
+      dirty
+    );
   }
+
+  // Training progress is keyed by its own id (no localId); replace by id. It is
+  // not written through the sync queue, so there is nothing to clobber.
+  const { data: tpRows, error: tpErr } = await supabase
+    .from('training_progress')
+    .select('*')
+    .eq('user_id', userId);
+  if (tpErr) throw tpErr;
+  const progress = (tpRows ?? []).map((r) =>
+    fromRow<TrainingProgress>('training_progress', r as Record<string, unknown>)
+  );
+  if (progress.length > 0) await db.trainingProgress.bulkPut(progress);
 }
 
 // Property operations

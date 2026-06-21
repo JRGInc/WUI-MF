@@ -18,6 +18,10 @@ export interface GeoPose {
   accuracy: number | null; // GPS horizontal accuracy, metres
   heading: number | null; // degrees from true north, clockwise
   headingAccuracy: number | null;
+  // Device tilt for AR pitch/roll. beta ≈ 90° when the phone is held upright
+  // facing the horizon; gamma is left/right roll. Both in degrees.
+  beta: number | null;
+  gamma: number | null;
   permission: 'unknown' | 'granted' | 'denied' | 'unsupported';
   error: string | null;
 }
@@ -37,6 +41,8 @@ export function useGeoPose(enabled: boolean) {
     accuracy: null,
     heading: null,
     headingAccuracy: null,
+    beta: null,
+    gamma: null,
     permission: 'unknown',
     error: null,
   });
@@ -58,9 +64,16 @@ export function useGeoPose(enabled: boolean) {
       heading = (360 - e.alpha) % 360;
     }
 
-    if (heading !== null) {
-      setPose((prev) => ({ ...prev, heading, headingAccuracy }));
-    }
+    const beta = typeof e.beta === 'number' ? e.beta : null;
+    const gamma = typeof e.gamma === 'number' ? e.gamma : null;
+
+    setPose((prev) => ({
+      ...prev,
+      heading: heading ?? prev.heading,
+      headingAccuracy: heading !== null ? headingAccuracy : prev.headingAccuracy,
+      beta: beta ?? prev.beta,
+      gamma: gamma ?? prev.gamma,
+    }));
   }, []);
 
   // --- request iOS motion/orientation permission (must be called from a gesture) ---

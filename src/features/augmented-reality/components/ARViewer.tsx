@@ -15,6 +15,7 @@ import { WebXRScene } from './WebXRScene';
 import { CameraFallback } from './CameraFallback';
 import { RiskAnnotation } from './RiskAnnotation';
 import { GeoMarkerOverlay } from './GeoMarkerOverlay';
+import { useGeoPose } from '../hooks/useGeoPose';
 import { useAnnotations } from '@/features/maps/hooks/useAnnotations';
 import { useLiveFrameAnalysis } from '@/features/computer-vision/hooks/useLiveFrameAnalysis';
 import { addFindingToAssessment } from '@/shared/services/offlineStorage';
@@ -66,6 +67,9 @@ export default function ARViewer() {
   // Map-placed annotations for this assessment, shown as geo-anchored 3D markers
   // over the camera (Phase 3). addAnnotation closes the loop for Phase 4 (AR → map).
   const { annotations: geoAnnotations, addAnnotation } = useAnnotations(assessmentId);
+  // Geo-pose for the XR path (experimental). Only watches in XR mode; the non-XR
+  // overlay owns its own pose instance, and the two modes are mutually exclusive.
+  const xrGeoPose = useGeoPose(useXR);
   const [pendingArCoords, setPendingArCoords] = useState<GeoCoordinates | null>(null);
   const [arDraftTitle, setArDraftTitle] = useState('');
   const [arDraftType, setArDraftType] = useState<AnnotationType>('risk-marker');
@@ -184,6 +188,8 @@ export default function ARViewer() {
           scanIntervalMs={SCAN_INTERVAL_MS}
           onRisks={setXrRisks}
           onScanState={setXrScanState}
+          geoAnnotations={geoAnnotations}
+          geoPose={xrGeoPose}
         />
       ) : (
         <CameraFallback

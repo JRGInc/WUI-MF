@@ -5,7 +5,15 @@ import { useHitTest } from '../hooks/useHitTest';
 import { useARMeasurement } from '../hooks/useARMeasurement';
 import { useXRCameraCapture } from '../hooks/useXRCameraCapture';
 import { useFrameAnalysisLoop } from '@/features/computer-vision/hooks/useFrameAnalysisLoop';
-import type { DetectedRisk } from '@/shared/types';
+import { geoToEnu, enuToThree } from '../utils/geoEnu';
+import { makeMarkerSprite, disposeMarkerSprite } from '../utils/markerSprite';
+import { annotationRisk } from '@/shared/utils/annotationStyle';
+import type { GeoPose } from '../hooks/useGeoPose';
+import type { DetectedRisk, MapAnnotation } from '@/shared/types';
+
+// XR markers nearer/farther than this are depth-clamped (XR far plane is 50 m).
+const XR_MIN_DIST = 2;
+const XR_MAX_DIST = 40;
 
 interface WebXRSceneProps {
   domOverlayRoot: HTMLElement | null;
@@ -15,6 +23,11 @@ interface WebXRSceneProps {
   scanIntervalMs?: number;
   onRisks?: (risks: DetectedRisk[]) => void;
   onScanState?: (state: { isAnalyzing: boolean; cameraAccessAvailable: boolean }) => void;
+  // Experimental: geo-anchored map markers inside the XR scene. Positioned by
+  // geoToEnu from the device GPS fix and continuously yaw-aligned to the compass
+  // heading. Accuracy is GPS/compass-bound and depends on orientation permission.
+  geoAnnotations?: MapAnnotation[];
+  geoPose?: GeoPose;
 }
 
 export function WebXRScene({
@@ -24,6 +37,8 @@ export function WebXRScene({
   scanIntervalMs = 2500,
   onRisks,
   onScanState,
+  geoAnnotations,
+  geoPose,
 }: WebXRSceneProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
@@ -33,6 +48,13 @@ export function WebXRScene({
   const pointMeshesRef = useRef<THREE.Mesh[]>([]);
   const lineRef = useRef<THREE.Line | null>(null);
   const currentFrameRef = useRef<XRFrame | null>(null);
+
+  // Geo-marker group + the sprites in it; pose read via a ref so the animation
+  // loop (set up once) always sees the latest fix without re-binding.
+  const geoGroupRef = useRef<THREE.Group | null>(null);
+  const geoMarkersRef = useRef<{ sprite: THREE.Sprite; annotation: MapAnnotation }[]>([]);
+  const geoPoseRef = useRef<GeoPose | undefined>(geoPose);
+  geoPoseRef.current = geoPose;
 
   const { isSupported, session, referenceSpace, startSession, endSession } = useWebXR();
   const measurement = useARMeasurement();
@@ -106,11 +128,15 @@ export function WebXRScene({
     line.visible = false;
     scene.add(line);
 
+    const geoGroup = new THREE.Group();
+    scene.add(geoGroup);
+
     rendererRef.current = renderer;
     sceneRef.current = scene;
     cameraRef.current = camera;
     reticleRef.current = reticle;
     lineRef.current = line;
+    geoGroupRef.current = geoGroup;
 
     return () => {
       pointMeshesRef.current.forEach((m) => {
@@ -123,14 +149,38 @@ export function WebXRScene({
       reticleMat.dispose();
       lineGeom.dispose();
       lineMat.dispose();
+      geoMarkersRef.current.forEach(({ sprite }) => {
+        geoGroup.remove(sprite);
+        disposeMarkerSprite(sprite);
+      });
+      geoMarkersRef.current = [];
       renderer.dispose();
       rendererRef.current = null;
       sceneRef.current = null;
       cameraRef.current = null;
       reticleRef.current = null;
       lineRef.current = null;
+      geoGroupRef.current = null;
     };
   }, []);
+
+  // (Re)build geo-marker sprites when the annotation set changes.
+  useEffect(() => {
+    const group = geoGroupRef.current;
+    if (!group) return;
+
+    geoMarkersRef.current.forEach(({ sprite }) => {
+      group.remove(sprite);
+      disposeMarkerSprite(sprite);
+    });
+    geoMarkersRef.current = [];
+
+    for (const annotation of geoAnnotations ?? []) {
+      const sprite = makeMarkerSprite(annotation.content.title, annotationRisk(annotation.content));
+      group.add(sprite);
+      geoMarkersRef.current.push({ sprite, annotation });
+    }
+  }, [geoAnnotations]);
 
   // --- Start the XR session ---
   useEffect(() => {
@@ -199,6 +249,25 @@ export function WebXRScene({
 
       // Fulfil any pending XR camera capture request inside the frame.
       if (frame) xrCapture.tick(frame);
+
+      // Experimental geo markers: position each by geoToEnu and continuously
+      // yaw-align the group so ENU-north maps to the compass heading relative to
+      // the XR camera's current yaw. (Approximate — XR space has no true north.)
+      const group = geoGroupRef.current;
+      const pose = geoPoseRef.current;
+      if (group && pose?.coords && geoMarkersRef.current.length > 0) {
+        for (const { sprite, annotation } of geoMarkersRef.current) {
+          const enu = geoToEnu(pose.coords, annotation.coordinates);
+          const dist = Math.hypot(enu.east, enu.north) || 1;
+          const k = Math.min(XR_MAX_DIST, Math.max(XR_MIN_DIST, dist)) / dist;
+          const p = enuToThree({ east: enu.east * k, north: enu.north * k, up: 0 }, 0);
+          sprite.position.set(p.x, p.y, p.z);
+        }
+        if (pose.heading !== null) {
+          const camYaw = new THREE.Euler().setFromQuaternion(camera.quaternion, 'YXZ').y;
+          group.rotation.y = camYaw + THREE.MathUtils.degToRad(pose.heading);
+        }
+      }
 
       renderer.render(scene, camera);
     });
