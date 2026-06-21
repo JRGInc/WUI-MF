@@ -1,5 +1,11 @@
 import { createContext, useContext, useEffect, useState, ReactNode, useCallback } from 'react';
-import { db, syncPendingOperations, queueSyncOperation } from '@/shared/services/offlineStorage';
+import {
+  db,
+  syncPendingOperations,
+  pullRemoteData,
+  queueSyncOperation,
+} from '@/shared/services/offlineStorage';
+import { useAuth } from './AuthProvider';
 import { SyncOperation } from '@/shared/types';
 
 interface OfflineContextType {
@@ -14,6 +20,7 @@ interface OfflineContextType {
 const OfflineContext = createContext<OfflineContextType | undefined>(undefined);
 
 export function OfflineProvider({ children }: { children: ReactNode }) {
+  const { user } = useAuth();
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [isSyncing, setIsSyncing] = useState(false);
   const [pendingOperations, setPendingOperations] = useState(0);
@@ -47,19 +54,23 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
     return () => clearInterval(intervalId);
   }, []);
 
-  // Auto-sync when coming back online
+  // Auto-sync when online and signed in: pushes the queue, then pulls the user's
+  // remote records into Dexie. Runs on mount and whenever connectivity or the
+  // user changes.
   useEffect(() => {
-    if (isOnline && pendingOperations > 0) {
+    if (isOnline && user) {
       syncNow();
     }
-  }, [isOnline]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOnline, user]);
 
   const syncNow = useCallback(async () => {
     if (isSyncing || !isOnline) return;
 
     setIsSyncing(true);
     try {
-      await syncPendingOperations();
+      await syncPendingOperations(); // push local changes
+      if (user) await pullRemoteData(user.id); // pull remote into Dexie
       setLastSyncTime(new Date());
       const count = await db.syncQueue.count();
       setPendingOperations(count);
@@ -68,7 +79,7 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
     } finally {
       setIsSyncing(false);
     }
-  }, [isSyncing, isOnline]);
+  }, [isSyncing, isOnline, user]);
 
   const queueOperation = useCallback(
     async (operation: Omit<SyncOperation, 'id' | 'timestamp' | 'retryCount'>) => {

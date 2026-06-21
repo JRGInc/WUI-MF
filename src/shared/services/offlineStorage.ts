@@ -1,6 +1,7 @@
 import Dexie, { Table } from 'dexie';
 import { v4 as uuidv4 } from 'uuid';
 import { supabase } from './supabaseClient';
+import { upsertByDomainId } from './syncUpsert';
 import type {
   AnalyticsEvent,
   Assessment,
@@ -195,6 +196,56 @@ async function executeSyncOperation(operation: SyncOperation): Promise<void> {
     case 'delete':
       await supabase.from(table).delete().eq('id', recordId);
       break;
+  }
+}
+
+// --- Read sync (pull) ---------------------------------------------------------
+// The write path pushes the queue to Supabase; this is the inverse, pulling the
+// user's records down into Dexie so remote-created data (e.g. an assessment made
+// on another device) appears offline. Upsert is keyed by the domain `id`.
+
+// Pull the user's property → assessment → annotation hierarchy from Supabase
+// into Dexie. (training_progress/photos pull separately — photos carry blobs in
+// Storage and training_progress is keyed differently; tracked as follow-ups.)
+export async function pullRemoteData(userId: string): Promise<void> {
+  const pending = await db.syncQueue.toArray();
+  const dirty = new Set(pending.map((op) => op.recordId));
+
+  const { data: propRows, error: propErr } = await supabase
+    .from('properties')
+    .select('*')
+    .eq('user_id', userId);
+  if (propErr) throw propErr;
+  const properties = (propRows ?? []).map((r) =>
+    fromRow<Property>('properties', r as Record<string, unknown>)
+  );
+  await upsertByDomainId(db.properties, properties, dirty);
+
+  const propertyIds = properties.map((p) => p.id);
+  let assessmentIds: string[] = [];
+  if (propertyIds.length > 0) {
+    const { data: aRows, error: aErr } = await supabase
+      .from('assessments')
+      .select('*')
+      .in('property_id', propertyIds);
+    if (aErr) throw aErr;
+    const assessments = (aRows ?? []).map((r) =>
+      fromRow<Assessment>('assessments', r as Record<string, unknown>)
+    );
+    await upsertByDomainId(db.assessments, assessments, dirty);
+    assessmentIds = assessments.map((a) => a.id);
+  }
+
+  if (assessmentIds.length > 0) {
+    const { data: annRows, error: annErr } = await supabase
+      .from('map_annotations')
+      .select('*')
+      .in('assessment_id', assessmentIds);
+    if (annErr) throw annErr;
+    const annotations = (annRows ?? []).map((r) =>
+      fromRow<MapAnnotation>('map_annotations', r as Record<string, unknown>)
+    );
+    await upsertByDomainId(db.annotations, annotations, dirty);
   }
 }
 
