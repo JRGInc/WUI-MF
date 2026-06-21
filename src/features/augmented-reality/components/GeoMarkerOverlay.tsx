@@ -3,24 +3,20 @@ import * as THREE from 'three';
 import { MapPinIcon } from '@heroicons/react/24/outline';
 import { useGeoPose } from '../hooks/useGeoPose';
 import { geoToEnu, enuToGeo, enuToThree, distanceMeters } from '../utils/geoEnu';
+import { RISK_HEX, RISK_CSS, annotationRisk } from '@/shared/utils/annotationStyle';
 import type { GeoCoordinates, MapAnnotation, RiskLevel } from '@/shared/types';
 
 // How far ahead of the user a dropped marker lands, along the current heading.
 const DROP_AHEAD_M = 10;
 
-const RISK_HEX: Record<RiskLevel, number> = {
-  low: 0x22c55e,
-  moderate: 0xeab308,
-  high: 0xf97316,
-  extreme: 0xdc2626,
-};
-
-const RISK_CSS: Record<RiskLevel, string> = {
-  low: '#22c55e',
-  moderate: '#eab308',
-  high: '#f97316',
-  extreme: '#dc2626',
-};
+// Tailwind text color for a GPS accuracy reading (metres): green good, amber
+// usable, red rough — so the metres-not-centimetres caveat is visible, not hidden.
+function accuracyClass(acc: number | null): string {
+  if (acc == null) return 'text-white';
+  if (acc <= 10) return 'text-green-400';
+  if (acc <= 25) return 'text-amber-400';
+  return 'text-red-400';
+}
 
 // Markers nearer/farther than this are clamped in depth so they stay visible.
 const MIN_DIST = 4;
@@ -114,7 +110,7 @@ export function GeoMarkerOverlay({ annotations, active, onPlace }: GeoMarkerOver
     markersRef.current = [];
 
     for (const annotation of annotations) {
-      const risk = annotation.content.riskLevel ?? 'moderate';
+      const risk = annotationRisk(annotation.content);
       const texture = makeLabelTexture(annotation.content.title, risk);
       const material = new THREE.SpriteMaterial({ map: texture, depthTest: false, transparent: true });
       const sprite = new THREE.Sprite(material);
@@ -204,9 +200,13 @@ export function GeoMarkerOverlay({ annotations, active, onPlace }: GeoMarkerOver
           </button>
         ) : (
           <div className="px-3 py-1.5 rounded-lg bg-black/60 backdrop-blur text-white text-xs font-mono">
-            {pose.coords
-              ? `GPS ±${Math.round(pose.accuracy ?? 0)}m`
-              : 'Acquiring GPS…'}
+            {pose.coords ? (
+              <span className={accuracyClass(pose.accuracy)}>
+                GPS ±{Math.round(pose.accuracy ?? 0)}m
+              </span>
+            ) : (
+              'Acquiring GPS…'
+            )}
             {pose.heading !== null ? ` · ${Math.round(pose.heading)}°` : ' · no compass'}
           </div>
         )}
@@ -233,7 +233,7 @@ export function GeoMarkerOverlay({ annotations, active, onPlace }: GeoMarkerOver
             >
               <span
                 className="w-2.5 h-2.5 rounded-full"
-                style={{ background: RISK_CSS[a.content.riskLevel ?? 'moderate'] }}
+                style={{ background: RISK_CSS[annotationRisk(a.content)] }}
               />
               {a.content.title} · {dist < 1000 ? `${Math.round(dist)}m` : `${(dist / 1000).toFixed(1)}km`}
             </div>

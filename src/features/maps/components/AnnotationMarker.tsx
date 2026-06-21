@@ -1,23 +1,7 @@
 import { useEffect, useRef } from 'react';
 import mapboxgl from 'mapbox-gl';
-import type { AnnotationType, MapAnnotation, RiskLevel } from '@/shared/types';
-
-const RISK_COLORS: Record<RiskLevel, string> = {
-  low: '#22c55e',
-  moderate: '#eab308',
-  high: '#f97316',
-  extreme: '#dc2626',
-};
-
-// A glyph per annotation type so the marker reads at a glance. Distinct from
-// the house-shaped PropertyMarker — these are diamond tags.
-const TYPE_GLYPH: Record<AnnotationType, string> = {
-  'risk-marker': '▲',
-  measurement: '↔',
-  'photo-location': '◎',
-  recommendation: '✓',
-  note: '✎',
-};
+import type { MapAnnotation } from '@/shared/types';
+import { RISK_CSS, TYPE_GLYPH, annotationRisk } from '@/shared/utils/annotationStyle';
 
 function escapeHtml(s: string): string {
   return s
@@ -65,8 +49,7 @@ export function AnnotationMarker({ map, annotation, onClick }: AnnotationMarkerP
     if (!map) return;
     ensureStyle();
 
-    const risk = annotation.content.riskLevel ?? 'moderate';
-    const color = RISK_COLORS[risk];
+    const color = RISK_CSS[annotationRisk(annotation.content)];
     const glyph = TYPE_GLYPH[annotation.annotationType] ?? '•';
 
     const el = document.createElement('div');

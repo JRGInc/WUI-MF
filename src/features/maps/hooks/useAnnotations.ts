@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback } from 'react';
+import { useLiveQuery } from 'dexie-react-hooks';
 import { v4 as uuidv4 } from 'uuid';
 import {
-  getLocalAnnotations,
+  db,
   saveAnnotationLocally,
   updateAnnotationLocally,
   deleteAnnotationLocally,
@@ -20,31 +21,21 @@ interface NewAnnotation {
 }
 
 /**
- * Read/write the MapAnnotations attached to an assessment. Backed by Dexie via
- * the offlineStorage helpers, so a marker placed here is the same record the AR
- * viewer reads (and vice versa). No-ops with an empty list when there is no
- * assessment in context (annotations are always assessment-scoped).
+ * Read/write the MapAnnotations attached to an assessment. The read is a Dexie
+ * liveQuery, so a marker written from any view (map or AR) updates every other
+ * mounted view live — a marker dropped in AR appears on the map immediately,
+ * and vice versa. Writes go through the offlineStorage helpers (Dexie + sync
+ * queue); liveQuery picks up the change, so callers don't manage local state.
  */
 export function useAnnotations(assessmentId?: string) {
-  const [annotations, setAnnotations] = useState<MapAnnotation[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
-
-  const refresh = useCallback(async () => {
-    if (!assessmentId) {
-      setAnnotations([]);
-      return;
-    }
-    setIsLoading(true);
-    try {
-      setAnnotations(await getLocalAnnotations(assessmentId));
-    } finally {
-      setIsLoading(false);
-    }
-  }, [assessmentId]);
-
-  useEffect(() => {
-    void refresh();
-  }, [refresh]);
+  const annotations =
+    useLiveQuery(
+      () =>
+        assessmentId
+          ? db.annotations.where('assessmentId').equals(assessmentId).toArray()
+          : Promise.resolve([] as MapAnnotation[]),
+      [assessmentId]
+    ) ?? [];
 
   const addAnnotation = useCallback(
     async (input: NewAnnotation): Promise<MapAnnotation | null> => {
@@ -58,31 +49,17 @@ export function useAnnotations(assessmentId?: string) {
         createdAt: new Date().toISOString(),
       };
       await saveAnnotationLocally(annotation);
-      setAnnotations((prev) => [...prev, annotation]);
       return annotation;
     },
     [assessmentId]
   );
 
   const updateAnnotation = useCallback(
-    async (id: string, updates: Partial<MapAnnotation>) => {
-      await updateAnnotationLocally(id, updates);
-      setAnnotations((prev) => prev.map((a) => (a.id === id ? { ...a, ...updates } : a)));
-    },
+    (id: string, updates: Partial<MapAnnotation>) => updateAnnotationLocally(id, updates),
     []
   );
 
-  const removeAnnotation = useCallback(async (id: string) => {
-    await deleteAnnotationLocally(id);
-    setAnnotations((prev) => prev.filter((a) => a.id !== id));
-  }, []);
+  const removeAnnotation = useCallback((id: string) => deleteAnnotationLocally(id), []);
 
-  return {
-    annotations,
-    isLoading,
-    addAnnotation,
-    updateAnnotation,
-    removeAnnotation,
-    refresh,
-  };
+  return { annotations, addAnnotation, updateAnnotation, removeAnnotation };
 }
