@@ -2,8 +2,11 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { MapPinIcon } from '@heroicons/react/24/outline';
 import { useGeoPose } from '../hooks/useGeoPose';
-import { geoToEnu, enuToThree, distanceMeters } from '../utils/geoEnu';
-import type { MapAnnotation, RiskLevel } from '@/shared/types';
+import { geoToEnu, enuToGeo, enuToThree, distanceMeters } from '../utils/geoEnu';
+import type { GeoCoordinates, MapAnnotation, RiskLevel } from '@/shared/types';
+
+// How far ahead of the user a dropped marker lands, along the current heading.
+const DROP_AHEAD_M = 10;
 
 const RISK_HEX: Record<RiskLevel, number> = {
   low: 0x22c55e,
@@ -26,6 +29,9 @@ const MAX_DIST = 120;
 interface GeoMarkerOverlayProps {
   annotations: MapAnnotation[];
   active: boolean;
+  // Phase 4: called with the computed coordinate when the user drops a marker
+  // in AR. The parent captures details and persists it as a MapAnnotation.
+  onPlace?: (coords: GeoCoordinates) => void;
 }
 
 interface MarkerObj {
@@ -43,7 +49,7 @@ interface MarkerObj {
  * see the design note. Pitch/roll are not yet applied, so markers ride the
  * horizon line; turning left/right tracks correctly.
  */
-export function GeoMarkerOverlay({ annotations, active }: GeoMarkerOverlayProps) {
+export function GeoMarkerOverlay({ annotations, active, onPlace }: GeoMarkerOverlayProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
@@ -154,6 +160,19 @@ export function GeoMarkerOverlay({ annotations, active }: GeoMarkerOverlayProps)
     };
   }, [enabled, active]);
 
+  // Drop a marker ahead of the user along the current heading (Phase 4). With no
+  // compass we fall back to the user's exact GPS position.
+  const handleDrop = () => {
+    const { coords, heading } = poseRef.current;
+    if (!coords) return;
+    let placed: GeoCoordinates = coords;
+    if (heading !== null) {
+      const h = THREE.MathUtils.degToRad(heading);
+      placed = enuToGeo(coords, Math.sin(h) * DROP_AHEAD_M, Math.cos(h) * DROP_AHEAD_M);
+    }
+    onPlace?.(placed);
+  };
+
   // Live distance list for the HUD (cheap; recomputed only when pose/annotations change).
   const ranked = useMemo(() => {
     if (!pose.coords) return [];
@@ -162,7 +181,7 @@ export function GeoMarkerOverlay({ annotations, active }: GeoMarkerOverlayProps)
       .sort((x, y) => x.dist - y.dist);
   }, [annotations, pose.coords]);
 
-  if (!active || annotations.length === 0) return null;
+  if (!active) return null;
 
   return (
     <div ref={containerRef} className="absolute inset-0 z-[6] pointer-events-none">
@@ -179,7 +198,9 @@ export function GeoMarkerOverlay({ annotations, active }: GeoMarkerOverlayProps)
             className="flex items-center gap-2 px-3 py-2 rounded-lg bg-fire-600 text-white text-sm font-medium shadow-lg"
           >
             <MapPinIcon className="w-4 h-4" />
-            Show {annotations.length} marker{annotations.length === 1 ? '' : 's'} in AR
+            {annotations.length > 0
+              ? `Show ${annotations.length} marker${annotations.length === 1 ? '' : 's'} in AR`
+              : 'Enable AR positioning'}
           </button>
         ) : (
           <div className="px-3 py-1.5 rounded-lg bg-black/60 backdrop-blur text-white text-xs font-mono">
@@ -190,6 +211,17 @@ export function GeoMarkerOverlay({ annotations, active }: GeoMarkerOverlayProps)
           </div>
         )}
       </div>
+
+      {/* Drop a marker ahead (Phase 4: AR → map) */}
+      {enabled && onPlace && pose.coords && (
+        <button
+          onClick={handleDrop}
+          className="absolute bottom-20 left-1/2 -translate-x-1/2 pointer-events-auto flex items-center gap-2 px-4 py-2.5 rounded-full bg-fire-600 text-white text-sm font-semibold shadow-lg"
+        >
+          <MapPinIcon className="w-4 h-4" />
+          Drop marker {DROP_AHEAD_M}m ahead
+        </button>
+      )}
 
       {/* Nearest-markers HUD */}
       {enabled && ranked.length > 0 && (

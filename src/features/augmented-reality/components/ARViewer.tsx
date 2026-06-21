@@ -20,7 +20,14 @@ import { useLiveFrameAnalysis } from '@/features/computer-vision/hooks/useLiveFr
 import { addFindingToAssessment } from '@/shared/services/offlineStorage';
 import { track } from '@/shared/services/analytics';
 import { showSuccessToast, showErrorToast } from '@/shared/stores/toastStore';
-import type { DetectedRisk, Finding, RiskCategory } from '@/shared/types';
+import type {
+  AnnotationType,
+  DetectedRisk,
+  Finding,
+  GeoCoordinates,
+  RiskCategory,
+  RiskLevel,
+} from '@/shared/types';
 
 type ARMode = 'camera-overlay' | '3d-model' | 'measurement';
 
@@ -57,8 +64,30 @@ export default function ARViewer() {
   const useXR = isXRSupported && mode === 'measurement';
 
   // Map-placed annotations for this assessment, shown as geo-anchored 3D markers
-  // over the camera (Phase 3 of the Map ⇄ AR bridge).
-  const { annotations: geoAnnotations } = useAnnotations(assessmentId);
+  // over the camera (Phase 3). addAnnotation closes the loop for Phase 4 (AR → map).
+  const { annotations: geoAnnotations, addAnnotation } = useAnnotations(assessmentId);
+  const [pendingArCoords, setPendingArCoords] = useState<GeoCoordinates | null>(null);
+  const [arDraftTitle, setArDraftTitle] = useState('');
+  const [arDraftType, setArDraftType] = useState<AnnotationType>('risk-marker');
+  const [arDraftRisk, setArDraftRisk] = useState<RiskLevel>('high');
+
+  const handleSaveArAnnotation = useCallback(async () => {
+    if (!pendingArCoords) return;
+    const title = arDraftTitle.trim() || 'AR marker';
+    await addAnnotation({
+      coordinates: pendingArCoords,
+      annotationType: arDraftType,
+      content: {
+        title,
+        riskLevel: arDraftType === 'risk-marker' ? arDraftRisk : undefined,
+        source: 'ar',
+      },
+    });
+    void track('ar_marker_placed', { type: arDraftType, hasAssessment: !!assessmentId });
+    showSuccessToast('Marker saved', `${title} added — it will show on the map.`);
+    setPendingArCoords(null);
+    setArDraftTitle('');
+  }, [pendingArCoords, arDraftTitle, arDraftType, arDraftRisk, addAnnotation, assessmentId]);
 
   // Live scan in the camera-overlay (non-XR) path.
   const fallbackScanActive =
@@ -167,7 +196,70 @@ export default function ARViewer() {
 
       {/* Geo-anchored map markers over the camera (non-XR path) */}
       {!useXR && mode === 'camera-overlay' && (
-        <GeoMarkerOverlay annotations={geoAnnotations} active={isStreaming} />
+        <GeoMarkerOverlay
+          annotations={geoAnnotations}
+          active={isStreaming}
+          onPlace={assessmentId ? setPendingArCoords : undefined}
+        />
+      )}
+
+      {/* Capture form for an AR-dropped marker (Phase 4) */}
+      {pendingArCoords && (
+        <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/50 p-4">
+          <div className="card p-6 w-full max-w-sm space-y-4">
+            <h3 className="text-lg font-medium text-gray-900 dark:text-white">New AR marker</h3>
+            <div>
+              <label className="label">Title</label>
+              <input
+                autoFocus
+                value={arDraftTitle}
+                onChange={(e) => setArDraftTitle(e.target.value)}
+                className="input"
+                placeholder="e.g. Propane tank"
+              />
+            </div>
+            <div>
+              <label className="label">Type</label>
+              <select
+                value={arDraftType}
+                onChange={(e) => setArDraftType(e.target.value as AnnotationType)}
+                className="input"
+              >
+                <option value="risk-marker">Risk marker</option>
+                <option value="recommendation">Recommendation</option>
+                <option value="photo-location">Photo location</option>
+                <option value="measurement">Measurement</option>
+                <option value="note">Note</option>
+              </select>
+            </div>
+            {arDraftType === 'risk-marker' && (
+              <div>
+                <label className="label">Risk level</label>
+                <select
+                  value={arDraftRisk}
+                  onChange={(e) => setArDraftRisk(e.target.value as RiskLevel)}
+                  className="input"
+                >
+                  <option value="low">Low</option>
+                  <option value="moderate">Moderate</option>
+                  <option value="high">High</option>
+                  <option value="extreme">Extreme</option>
+                </select>
+              </div>
+            )}
+            <p className="text-xs text-gray-500 dark:text-gray-400">
+              {pendingArCoords.latitude.toFixed(5)}, {pendingArCoords.longitude.toFixed(5)}
+            </p>
+            <div className="flex gap-3 justify-end">
+              <button onClick={() => setPendingArCoords(null)} className="btn-outline">
+                Cancel
+              </button>
+              <button onClick={handleSaveArAnnotation} className="btn-primary">
+                Save marker
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Annotation overlay — lives above either backend so XR + fallback share it. */}
