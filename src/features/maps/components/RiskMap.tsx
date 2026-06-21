@@ -7,6 +7,9 @@ import {
   MapIcon,
   CloudIcon,
   MapPinIcon,
+  PlusIcon,
+  XMarkIcon,
+  TrashIcon,
 } from '@heroicons/react/24/outline';
 import { useAuth } from '@/app/providers/AuthProvider';
 import {
@@ -19,12 +22,20 @@ import { track } from '@/shared/services/analytics';
 import { useMapLayers } from '../hooks/useMapLayers';
 import { useUserLocation } from '../hooks/useUserLocation';
 import { PropertyMarker } from './PropertyMarker';
+import { AnnotationMarker } from './AnnotationMarker';
 import { FireHistoryLayer } from './FireHistoryLayer';
 import { MapControls, LayerToggle } from './MapControls';
 import { UserLocationMarker } from './UserLocationMarker';
 import { UserAccuracyCircle } from './UserAccuracyCircle';
+import { useAnnotations } from '../hooks/useAnnotations';
 import { createCircleFeature } from '../utils/geo';
-import type { GeoCoordinates, Property, RiskLevel } from '@/shared/types';
+import type {
+  AnnotationType,
+  GeoCoordinates,
+  MapAnnotation,
+  Property,
+  RiskLevel,
+} from '@/shared/types';
 
 // Set Mapbox token
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN || '';
@@ -76,6 +87,16 @@ export default function RiskMap({
   const [styleVersion, setStyleVersion] = useState(0);
   const [mapStyle, setMapStyle] = useState<'satellite' | 'streets' | 'terrain'>('satellite');
   const [propertyMarkers, setPropertyMarkers] = useState<PropertyMarkerData[]>([]);
+
+  // Annotation placement (Phase 1: place an icon on the map). Annotations are
+  // assessment-scoped, so placement is only offered when opened from one.
+  const { annotations, addAnnotation, removeAnnotation } = useAnnotations(assessmentId);
+  const [isPlacing, setIsPlacing] = useState(false);
+  const [pendingCoords, setPendingCoords] = useState<GeoCoordinates | null>(null);
+  const [selectedAnnotation, setSelectedAnnotation] = useState<MapAnnotation | null>(null);
+  const [draftTitle, setDraftTitle] = useState('');
+  const [draftType, setDraftType] = useState<AnnotationType>('risk-marker');
+  const [draftRisk, setDraftRisk] = useState<RiskLevel>('high');
 
   // Last center we drew defensible-space zones around, so they can be redrawn
   // after a style switch.
@@ -435,6 +456,55 @@ export default function RiskMap({
     }
   }, []);
 
+  // While placing, the next map click captures the drop point and opens the
+  // annotation form. Crosshair cursor signals the mode.
+  useEffect(() => {
+    const m = map.current;
+    if (!m || !mapLoaded || !isPlacing) return;
+
+    const handler = (e: mapboxgl.MapMouseEvent) => {
+      setPendingCoords({ latitude: e.lngLat.lat, longitude: e.lngLat.lng });
+      setIsPlacing(false);
+    };
+    m.on('click', handler);
+    m.getCanvas().style.cursor = 'crosshair';
+
+    return () => {
+      m.off('click', handler);
+      const canvas = m.getCanvas();
+      if (canvas) canvas.style.cursor = '';
+    };
+  }, [isPlacing, mapLoaded]);
+
+  const handleSaveAnnotation = useCallback(async () => {
+    if (!pendingCoords) return;
+    const title = draftTitle.trim() || 'Untitled marker';
+    await addAnnotation({
+      coordinates: pendingCoords,
+      annotationType: draftType,
+      content: {
+        title,
+        riskLevel: draftType === 'risk-marker' ? draftRisk : undefined,
+        source: 'map',
+      },
+    });
+    showSuccessToast('Marker placed', title);
+    setPendingCoords(null);
+    setDraftTitle('');
+  }, [pendingCoords, draftTitle, draftType, draftRisk, addAnnotation]);
+
+  const annotationElements = useMemo(() => {
+    if (!mapLoaded) return null;
+    return annotations.map((a) => (
+      <AnnotationMarker
+        key={a.id}
+        map={map.current}
+        annotation={a}
+        onClick={() => setSelectedAnnotation(a)}
+      />
+    ));
+  }, [annotations, mapLoaded]);
+
   // Memoized so marker elements keep their identity across unrelated
   // re-renders — PropertyMarker tears down/re-creates its mapboxgl.Marker
   // whenever its props change.
@@ -505,6 +575,7 @@ export default function RiskMap({
         />
       )}
       {markerElements}
+      {annotationElements}
 
       {/* "You are here" indicator + GPS accuracy halo */}
       {mapLoaded && userLocation.coords && (
@@ -607,6 +678,129 @@ export default function RiskMap({
           </div>
         </div>
       </div>
+
+      {/* Place-marker toggle (only when opened from an assessment) */}
+      {showControls && assessmentId && (
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-10">
+          <button
+            onClick={() => {
+              setIsPlacing((p) => !p);
+              setPendingCoords(null);
+            }}
+            className={`flex items-center gap-2 px-3 py-2 rounded-lg shadow-lg text-sm font-medium ${
+              isPlacing
+                ? 'bg-fire-600 text-white'
+                : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700'
+            }`}
+          >
+            {isPlacing ? (
+              <>
+                <XMarkIcon className="w-4 h-4" /> Tap the map to place — cancel
+              </>
+            ) : (
+              <>
+                <PlusIcon className="w-4 h-4" /> Place marker
+              </>
+            )}
+          </button>
+        </div>
+      )}
+
+      {/* New-annotation form */}
+      {pendingCoords && (
+        <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/40 p-4">
+          <div className="card p-6 w-full max-w-sm space-y-4">
+            <h3 className="text-lg font-medium text-gray-900 dark:text-white">New marker</h3>
+            <div>
+              <label className="label">Title</label>
+              <input
+                autoFocus
+                value={draftTitle}
+                onChange={(e) => setDraftTitle(e.target.value)}
+                className="input"
+                placeholder="e.g. Dead tree near deck"
+              />
+            </div>
+            <div>
+              <label className="label">Type</label>
+              <select
+                value={draftType}
+                onChange={(e) => setDraftType(e.target.value as AnnotationType)}
+                className="input"
+              >
+                <option value="risk-marker">Risk marker</option>
+                <option value="recommendation">Recommendation</option>
+                <option value="photo-location">Photo location</option>
+                <option value="measurement">Measurement</option>
+                <option value="note">Note</option>
+              </select>
+            </div>
+            {draftType === 'risk-marker' && (
+              <div>
+                <label className="label">Risk level</label>
+                <select
+                  value={draftRisk}
+                  onChange={(e) => setDraftRisk(e.target.value as RiskLevel)}
+                  className="input"
+                >
+                  <option value="low">Low</option>
+                  <option value="moderate">Moderate</option>
+                  <option value="high">High</option>
+                  <option value="extreme">Extreme</option>
+                </select>
+              </div>
+            )}
+            <p className="text-xs text-gray-500 dark:text-gray-400">
+              {pendingCoords.latitude.toFixed(5)}, {pendingCoords.longitude.toFixed(5)}
+            </p>
+            <div className="flex gap-3 justify-end">
+              <button onClick={() => setPendingCoords(null)} className="btn-outline">
+                Cancel
+              </button>
+              <button onClick={handleSaveAnnotation} className="btn-primary">
+                Save marker
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Selected-marker detail */}
+      {selectedAnnotation && (
+        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20 w-full max-w-xs px-4">
+          <div className="card p-4 space-y-2">
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <p className="font-medium text-gray-900 dark:text-white">
+                  {selectedAnnotation.content.title}
+                </p>
+                <p className="text-xs text-gray-500 dark:text-gray-400 capitalize">
+                  {selectedAnnotation.annotationType.replace('-', ' ')}
+                  {selectedAnnotation.content.riskLevel
+                    ? ` · ${selectedAnnotation.content.riskLevel} risk`
+                    : ''}
+                </p>
+              </div>
+              <button
+                onClick={() => setSelectedAnnotation(null)}
+                className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+              >
+                <XMarkIcon className="w-5 h-5" />
+              </button>
+            </div>
+            <button
+              onClick={async () => {
+                await removeAnnotation(selectedAnnotation.id);
+                setSelectedAnnotation(null);
+                showSuccessToast('Marker removed');
+              }}
+              className="flex items-center gap-2 text-sm text-red-600 hover:text-red-700"
+            >
+              <TrashIcon className="w-4 h-4" /> Remove marker
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Loading overlay */}
       {!mapLoaded && (

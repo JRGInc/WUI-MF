@@ -85,7 +85,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setSession(MOCK_SESSION);
       return;
     }
-    const { error, data } = await supabase.auth.signUp({
+    const { error } = await supabase.auth.signUp({
       email,
       password,
       options: {
@@ -96,13 +96,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
     if (error) throw error;
 
-    // Create profile record
-    if (data.user) {
-      await supabase.from('profiles').insert({
-        id: data.user.id,
-        full_name: fullName,
-      });
-    }
+    // The profile row is created server-side by the handle_new_user() trigger
+    // (after insert on auth.users) — see supabase/migrations. No client insert
+    // is needed, and attempting one here races RLS before the session settles.
   };
 
   const signOut = async () => {

@@ -21,6 +21,7 @@ export interface Property {
 export interface GeoCoordinates {
   latitude: number;
   longitude: number;
+  altitude?: number;
 }
 
 // Assessment Types
@@ -193,6 +194,9 @@ export interface AnnotationContent {
   photoId?: string;
   measurementValue?: number;
   measurementUnit?: string;
+  // Which view placed this annotation. Both map and AR write the same
+  // MapAnnotation; this records the origin so each view can label/round-trip it.
+  source?: 'map' | 'ar';
 }
 
 export interface MapLayer {

@@ -15,6 +15,9 @@ export default defineConfig({
   },
   preview: {
     port: 574,
+    // Mirror the dev server so production-preview is reachable through a
+    // temporary Cloudflare tunnel (preview does not inherit server.allowedHosts).
+    allowedHosts: ['.trycloudflare.com'],
   },
   plugins: [
     react(),

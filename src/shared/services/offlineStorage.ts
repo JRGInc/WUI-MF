@@ -290,6 +290,56 @@ export async function addFindingToAssessment(
   if (updateError) throw updateError;
 }
 
+// Annotation operations. Both the map and the AR viewer write MapAnnotations
+// through these helpers, so a marker placed in one view is the same record the
+// other view reads (see the Map ⇄ AR design note). Reads come from Dexie; the
+// snake_case map_annotations column mapping is already in COLUMN_MAPS.
+export async function saveAnnotationLocally(annotation: MapAnnotation): Promise<string> {
+  const localId = await db.annotations.add({ ...annotation, localId: uuidv4() });
+
+  await queueSyncOperation({
+    type: 'create',
+    table: 'map_annotations',
+    recordId: annotation.id,
+    data: annotation,
+  });
+
+  return String(localId);
+}
+
+export async function updateAnnotationLocally(
+  id: string,
+  updates: Partial<MapAnnotation>
+): Promise<void> {
+  const annotation = await db.annotations.where('id').equals(id).first();
+  if (!annotation) return;
+
+  await db.annotations.update(annotation.localId!, updates);
+  await queueSyncOperation({
+    type: 'update',
+    table: 'map_annotations',
+    recordId: id,
+    data: updates,
+  });
+}
+
+export async function deleteAnnotationLocally(id: string): Promise<void> {
+  const annotation = await db.annotations.where('id').equals(id).first();
+  if (!annotation) return;
+
+  await db.annotations.delete(annotation.localId!);
+  await queueSyncOperation({
+    type: 'delete',
+    table: 'map_annotations',
+    recordId: id,
+    data: {},
+  });
+}
+
+export async function getLocalAnnotations(assessmentId: string): Promise<MapAnnotation[]> {
+  return db.annotations.where('assessmentId').equals(assessmentId).toArray();
+}
+
 // Photo operations
 export async function savePhotoLocally(
   photo: AssessmentPhoto,
