@@ -168,6 +168,16 @@ export default function Login() {
             <p className="mt-4 text-center text-xs text-gray-500 dark:text-gray-400">
               This app works offline. Your data will sync when you're back online.
             </p>
+
+            <p className="mt-4 text-center text-xs text-gray-500 dark:text-gray-400">
+              <Link to="/terms" className="font-medium text-fire-600 hover:text-fire-500">
+                Terms of Service
+              </Link>{' '}
+              &middot;{' '}
+              <Link to="/privacy" className="font-medium text-fire-600 hover:text-fire-500">
+                Privacy Policy
+              </Link>
+            </p>
           </div>
         </div>
       </div>

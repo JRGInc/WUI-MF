@@ -186,13 +186,13 @@ export default function Register() {
                 className="ml-2 block text-sm text-gray-900 dark:text-gray-300"
               >
                 I agree to the{' '}
-                <a href="#" className="text-fire-600 hover:text-fire-500">
+                <Link to="/terms" className="text-fire-600 hover:text-fire-500">
                   Terms of Service
-                </a>{' '}
+                </Link>{' '}
                 and{' '}
-                <a href="#" className="text-fire-600 hover:text-fire-500">
+                <Link to="/privacy" className="text-fire-600 hover:text-fire-500">
                   Privacy Policy
-                </a>
+                </Link>
               </label>
             </div>
 

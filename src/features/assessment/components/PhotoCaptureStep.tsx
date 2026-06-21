@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback } from 'react';
+import { Link } from 'react-router-dom';
 import { v4 as uuidv4 } from 'uuid';
 import {
   CameraIcon,
@@ -197,8 +198,20 @@ export function PhotoCaptureStep({
           </span>
           <span className="block mt-0.5 text-xs text-gray-500 dark:text-gray-400">
             If enabled, photos from this assessment (with the hazard tags you add)
-            may be used to train the app's on-device detection models. Photos are
-            not shared publicly, and you can tag visible hazards after capturing.
+            may be used to train our hazard-detection models and may be included in
+            JANUS research and educational materials, such as research papers and
+            presentations, which may be published. We do not share your photos with
+            insurers, advertisers, or public-safety organizations. If you leave this
+            off, your photos are used only for your own assessment. See our{' '}
+            <Link
+              to="/privacy"
+              target="_blank"
+              className="text-fire-600 hover:text-fire-500 underline"
+              onClick={(e) => e.stopPropagation()}
+            >
+              Privacy Policy
+            </Link>
+            .
           </span>
         </span>
       </label>
@@ -386,7 +399,7 @@ export function PhotoCaptureStep({
           <li>• Take photos in good lighting for best analysis results</li>
           <li>• Include the full area you want to assess in each photo</li>
           <li>• Take multiple photos from different angles</li>
-          <li>• Photos are analyzed on your device for privacy</li>
+          <li>• Photos are analyzed on your device; how they may be used is governed by your consent choice above</li>
         </ul>
       </div>
     </div>

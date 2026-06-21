@@ -19,6 +19,8 @@ const LessonViewer = lazy(() => import('@/features/training/components/LessonVie
 const Settings = lazy(() => import('@/features/settings/Settings'));
 const Login = lazy(() => import('@/features/auth/Login'));
 const Register = lazy(() => import('@/features/auth/Register'));
+const PrivacyPolicy = lazy(() => import('@/features/legal/PrivacyPolicy'));
+const TermsOfService = lazy(() => import('@/features/legal/TermsOfService'));
 
 function App() {
   return (
@@ -31,6 +33,8 @@ function App() {
                 {/* Public routes */}
                 <Route path="/login" element={<Login />} />
                 <Route path="/register" element={<Register />} />
+                <Route path="/privacy" element={<PrivacyPolicy />} />
+                <Route path="/terms" element={<TermsOfService />} />
 
                 {/* Protected routes with layout */}
                 <Route element={<ProtectedRoute />}>

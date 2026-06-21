@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import {
   UserCircleIcon,
   BellIcon,
@@ -9,6 +10,8 @@ import {
   ComputerDesktopIcon,
   TrashIcon,
   ArrowRightOnRectangleIcon,
+  ArrowDownTrayIcon,
+  NoSymbolIcon,
 } from '@heroicons/react/24/outline';
 import { useAuth } from '@/app/providers/AuthProvider';
 import { useTheme } from '@/app/providers/ThemeProvider';
@@ -110,6 +113,73 @@ export default function Settings() {
       console.error('Error clearing data:', error);
       showErrorToast('Failed to clear data');
     }
+  }
+
+  async function exportMyData() {
+    try {
+      const [
+        properties,
+        assessments,
+        photos,
+        annotations,
+        trainingProgress,
+        analyticsEvents,
+      ] = await Promise.all([
+        db.properties.toArray(),
+        db.assessments.toArray(),
+        db.photos.toArray(),
+        db.annotations.toArray(),
+        db.trainingProgress.toArray(),
+        db.analyticsEvents.toArray(),
+      ]);
+
+      const payload = {
+        exportedAt: new Date().toISOString(),
+        account: { id: user?.id ?? null, email: user?.email ?? null },
+        // Photo binary data is omitted; metadata and tags are included.
+        photos: photos.map((p) => ({ ...p, blob: undefined })),
+        properties,
+        assessments,
+        annotations,
+        trainingProgress,
+        analyticsEvents,
+      };
+
+      const blob = new Blob([JSON.stringify(payload, null, 2)], {
+        type: 'application/json',
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `wildfire-risk-data-export-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      showSuccessToast('Data exported', 'Your data was downloaded as a JSON file.');
+    } catch (error) {
+      console.error('Export failed:', error);
+      showErrorToast('Export failed', 'Could not export your data. Please try again.');
+    }
+  }
+
+  function requestDataDeletion() {
+    if (
+      !confirm(
+        'This will open an email to request permanent deletion of your account and associated data. ' +
+          'Your request will be completed within 30 days. Continue?'
+      )
+    )
+      return;
+
+    const subject = encodeURIComponent('Data deletion request');
+    const body = encodeURIComponent(
+      `I request deletion of my account and associated personal data under the Privacy Policy.\n\n` +
+        `Account email: ${user?.email ?? '(unknown)'}\n` +
+        `User ID: ${user?.id ?? '(unknown)'}\n\n` +
+        `I understand this request will be completed within 30 days.\n`
+    );
+    window.location.href = `mailto:kishan.shetty@janusresearch.us?subject=${subject}&body=${body}`;
   }
 
   async function handleSignOut() {
@@ -348,18 +418,61 @@ export default function Settings() {
           </h2>
         </div>
 
-        <div className="space-y-4 text-sm text-gray-600 dark:text-gray-400">
+        <div className="space-y-5 text-sm text-gray-600 dark:text-gray-400">
           <p>
-            Your assessment data is stored securely and encrypted. Photos are analyzed
-            on your device for privacy.
-          </p>
-          <div className="flex gap-4">
-            <a href="#" className="text-fire-600 hover:text-fire-700">
+            Photos are analyzed on your device. With your per-photo consent, photos may
+            also be used to train our models and appear in JANUS research and educational
+            materials; otherwise they are used only for your assessment. See our{' '}
+            <Link to="/privacy" className="text-fire-600 hover:text-fire-700">
               Privacy Policy
-            </a>
-            <a href="#" className="text-fire-600 hover:text-fire-700">
+            </Link>{' '}
+            for how your data is used and shared.
+          </p>
+
+          {/* Data rights */}
+          <div className="space-y-3 border-t border-gray-200 dark:border-gray-700 pt-4">
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <p className="font-medium text-gray-900 dark:text-white">Export my data</p>
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  Download a copy of your account, assessments, and photo metadata as JSON.
+                </p>
+              </div>
+              <button
+                onClick={exportMyData}
+                className="btn-outline text-sm flex items-center gap-2 whitespace-nowrap"
+              >
+                <ArrowDownTrayIcon className="w-4 h-4" />
+                Export
+              </button>
+            </div>
+
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <p className="font-medium text-gray-900 dark:text-white">
+                  Request data deletion
+                </p>
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  Ask us to permanently delete your account and associated data. Completed within 30 days.
+                </p>
+              </div>
+              <button
+                onClick={requestDataDeletion}
+                className="btn-outline text-sm flex items-center gap-2 whitespace-nowrap text-red-600 hover:text-red-700"
+              >
+                <NoSymbolIcon className="w-4 h-4" />
+                Request
+              </button>
+            </div>
+          </div>
+
+          <div className="flex gap-4 border-t border-gray-200 dark:border-gray-700 pt-4">
+            <Link to="/privacy" className="text-fire-600 hover:text-fire-700">
+              Privacy Policy
+            </Link>
+            <Link to="/terms" className="text-fire-600 hover:text-fire-700">
               Terms of Service
-            </a>
+            </Link>
           </div>
         </div>
       </div>
