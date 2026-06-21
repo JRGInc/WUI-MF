@@ -87,6 +87,7 @@ is on — stop and switch it off before testing Suites 2, 11, 12.
 | WIZ-09 | Save / complete | Save the assessment. | Persists; appears on the dashboard and in the property's assessments. |
 | WIZ-10 | Edit existing | Open `/assessment/:id/edit`. | Wizard pre-loads saved data; edits save back. |
 | WIZ-11 | Offline create | Go offline (Suite 11), run WIZ-01..09. | Works fully; queued for sync; visible immediately from local storage. |
+| WIZ-12 | Photos visible in detail | Open a saved assessment's detail (`/assessment/:id`). | A Photos section shows captured photos. After sync (blob cleared), they still display via the Storage URL. |
 
 ---
 
@@ -137,6 +138,8 @@ Requires HTTPS, camera, GPS, and ideally a compass (mobile). Test outdoors.
 | BRIDGE-04 | AR → Map | In AR, tap "Drop marker 10m ahead"; complete the form; Save. | Marker saved (source: AR); toast confirms. |
 | BRIDGE-05 | Live cross-view sync | Keep the map open in one tab and AR in another (same account/assessment). Drop a marker in AR. | It appears on the map **without reload** (and map-placed markers appear in AR). |
 | BRIDGE-06 | No-compass fallback | On a device without a compass. | Dropping falls back to placing at your GPS position; AR shows "no compass". |
+| BRIDGE-07 | Pitch/roll tracking | With markers shown in AR, tilt the phone up/down and roll it side to side. | Markers track the tilt (move down as you raise the phone, etc.), not just left/right. ⚠️ Experimental — if motion feels inverted on your device, note it (sign calibration). |
+| BRIDGE-08 | XR geo markers (experimental) | On a WebXR-capable device (e.g. Android Chrome), enter measurement mode with markers present and grant motion. | Markers render in the XR scene roughly in their real-world direction. ⚠️ Experimental/approximate — XR space has no true north; expect drift. Not expected to work on iOS. |
 
 ---
 
@@ -204,9 +207,11 @@ Two browsers (A and B) signed into the **same** account.
 | SYNC-02 | Annotation pull | On A, place a map marker on an assessment and sync. Reload B. | The marker appears on B's map for that assessment. |
 | SYNC-03 | No clobber of local edits | On B (offline), edit a record A also changed. Bring B online. | B's unpushed local edit is **not** overwritten by the pull; it pushes on reconnect. |
 | SYNC-04 | Sign-in triggers pull | Sign in on a fresh browser. | Existing account data is pulled into the new client. |
+| SYNC-05 | Photo pull | On A, capture photos on an assessment and sync. Open the assessment on B. | B shows the photos in the detail Photos section (fetched from Storage; blobs aren't transferred, the metadata + URL are). |
+| SYNC-06 | Training progress pull | On A, complete a lesson. Open fresh on B. | B reflects the completed lesson / course progress. |
 
-> Note: photo blobs and training progress are **not** pulled cross-device yet
-> (known limitation, §15).
+> Note: photo **blobs** themselves aren't copied between devices — B loads images
+> from Storage via URL. Conflict policy is last-write-wins with a dirty-skip guard.
 
 ---
 
@@ -216,6 +221,7 @@ Two browsers (A and B) signed into the **same** account.
 |---|---|---|---|
 | SHARE-01 | Open shared report | Open a valid `/report/:token` link. | Read-only assessment report renders without login. |
 | SHARE-02 | Invalid/expired token | Open a bad token. | Graceful "not found/expired" state; no crash, no data leak. |
+| SHARE-03 | Photos in shared report | Open a valid `/report/:token` for an assessment that has photos, in a browser not signed into the owner account. | Photos appear (fetched from Supabase under the shared-read RLS policy). |
 
 ---
 
@@ -239,12 +245,13 @@ These are **expected** behaviors — not bugs. Don't file them.
 
 - **AR positioning accuracy:** GPS ±metres and compass drift; markers can be
   several metres off and swing when turning. Not survey-grade.
-- **AR markers ride the horizon:** pitch/roll aren't applied yet, so markers sit
-  on the horizon line rather than pinning to a ground point.
-- **WebXR path isn't geo-anchored:** geo markers are the non-XR camera overlay;
-  the XR/measurement session isn't tied to compass north.
-- **Cross-device pull is partial:** properties, assessments, and map annotations
-  pull down; **photos and training progress do not yet.**
+- **AR pitch/roll is approximate & unverified per device:** tilt tracking uses a
+  conventional portrait sign mapping; an inverted axis on a given device is a
+  calibration note (BRIDGE-07), not a release blocker.
+- **WebXR geo markers are experimental:** the XR scene has no true north, so the
+  alignment is approximate and drifts; non-XR overlay is the primary path.
+- **Photo blobs aren't copied between devices:** metadata + Storage URL sync;
+  the image bytes are served from Storage, not transferred device-to-device.
 - **Account deletion is request-based:** the in-app control sends an email
   request (completed within 30 days), not an instant self-service hard delete.
 - **Insurer/advertiser data sharing is not active** — disclosed as planned/future
