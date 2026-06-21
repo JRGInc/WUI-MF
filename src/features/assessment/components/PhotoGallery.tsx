@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { getLocalPhotos, photoDisplayUrl } from '@/shared/services/offlineStorage';
+import { getLocalPhotos, photoDisplayUrl, fromRow } from '@/shared/services/offlineStorage';
+import { supabase } from '@/shared/services/supabaseClient';
 import type { AssessmentPhoto } from '@/shared/types';
 
 interface PhotoGalleryProps {
@@ -11,6 +12,10 @@ interface PhotoGalleryProps {
  * so locally-captured photos (object URL from their blob) and synced/pulled
  * photos (Supabase Storage URL from storagePath, blob cleared) both display.
  * Object URLs are revoked on unmount / reload to avoid leaks.
+ *
+ * When there are no local photos (a shared /report/:token view, or an
+ * assessment the viewer hasn't synced), it falls back to fetching photo
+ * metadata from Supabase — RLS (photos_select_shared) permits the shared read.
  */
 export function PhotoGallery({ assessmentId }: PhotoGalleryProps) {
   const [items, setItems] = useState<{ photo: AssessmentPhoto; url: string }[]>([]);
@@ -20,7 +25,16 @@ export function PhotoGallery({ assessmentId }: PhotoGalleryProps) {
     let cancelled = false;
 
     (async () => {
-      const photos = await getLocalPhotos(assessmentId);
+      let photos = await getLocalPhotos(assessmentId);
+      if (photos.length === 0) {
+        const { data } = await supabase
+          .from('assessment_photos')
+          .select('*')
+          .eq('assessment_id', assessmentId);
+        photos = (data ?? []).map((r) =>
+          fromRow<AssessmentPhoto>('assessment_photos', r as Record<string, unknown>)
+        );
+      }
       const resolved: { photo: AssessmentPhoto; url: string }[] = [];
       for (const photo of photos) {
         const r = photoDisplayUrl(photo);
