@@ -14,6 +14,8 @@ import { useWebXR } from '../hooks/useWebXR';
 import { WebXRScene } from './WebXRScene';
 import { CameraFallback } from './CameraFallback';
 import { RiskAnnotation } from './RiskAnnotation';
+import { GeoMarkerOverlay } from './GeoMarkerOverlay';
+import { useAnnotations } from '@/features/maps/hooks/useAnnotations';
 import { useLiveFrameAnalysis } from '@/features/computer-vision/hooks/useLiveFrameAnalysis';
 import { addFindingToAssessment } from '@/shared/services/offlineStorage';
 import { track } from '@/shared/services/analytics';
@@ -53,6 +55,10 @@ export default function ARViewer() {
 
   const { isSupported: isXRSupported } = useWebXR();
   const useXR = isXRSupported && mode === 'measurement';
+
+  // Map-placed annotations for this assessment, shown as geo-anchored 3D markers
+  // over the camera (Phase 3 of the Map ⇄ AR bridge).
+  const { annotations: geoAnnotations } = useAnnotations(assessmentId);
 
   // Live scan in the camera-overlay (non-XR) path.
   const fallbackScanActive =
@@ -157,6 +163,11 @@ export default function ARViewer() {
           videoRef={videoRef}
           onStreamingChange={setIsStreaming}
         />
+      )}
+
+      {/* Geo-anchored map markers over the camera (non-XR path) */}
+      {!useXR && mode === 'camera-overlay' && (
+        <GeoMarkerOverlay annotations={geoAnnotations} active={isStreaming} />
       )}
 
       {/* Annotation overlay — lives above either backend so XR + fallback share it. */}
