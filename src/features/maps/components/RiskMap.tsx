@@ -24,6 +24,8 @@ import { useUserLocation } from '../hooks/useUserLocation';
 import { PropertyMarker } from './PropertyMarker';
 import { AnnotationMarker } from './AnnotationMarker';
 import { FireHistoryLayer } from './FireHistoryLayer';
+import { VegetationLayer } from './VegetationLayer';
+import { SlopeLayer } from './SlopeLayer';
 import { MapControls, LayerToggle } from './MapControls';
 import { UserLocationMarker } from './UserLocationMarker';
 import { UserAccuracyCircle } from './UserAccuracyCircle';
@@ -106,6 +108,8 @@ export default function RiskMap({
 
   const { layers, toggleLayer } = useMapLayers();
   const fireHistory = layers.find((l) => l.id === 'fire-history');
+  const vegetation = layers.find((l) => l.id === 'vegetation');
+  const terrain = layers.find((l) => l.id === 'terrain');
 
   // Live device position (browser asks for permission on first map visit).
   const userLocation = useUserLocation();
@@ -189,9 +193,10 @@ export default function RiskMap({
     }
   }, [mapStyle, mapLoaded]);
 
-  // Sync layer visibility with map. fire-history is owned by the
-  // <FireHistoryLayer> component below; styleVersion re-applies everything
-  // after a style switch rebuilds the layers.
+  // Sync layer visibility with map. fire-history, vegetation and terrain
+  // (slope) are owned by the <FireHistoryLayer> / <VegetationLayer> /
+  // <SlopeLayer> components below; styleVersion re-applies everything after a
+  // style switch rebuilds the layers.
   useEffect(() => {
     if (!map.current || !mapLoaded) return;
 
@@ -204,25 +209,6 @@ export default function RiskMap({
             map.current.setLayoutProperty(layerId, 'visibility', visibility);
           }
         });
-      } else if (layer.id === 'vegetation') {
-        if (map.current?.getLayer('vegetation-layer')) {
-          map.current.setLayoutProperty('vegetation-layer', 'visibility', visibility);
-        }
-      } else if (layer.id === 'terrain') {
-        // Terrain is handled differently - toggle 3D terrain
-        if (layer.visible) {
-          if (!map.current?.getSource('mapbox-dem')) {
-            map.current?.addSource('mapbox-dem', {
-              type: 'raster-dem',
-              url: 'mapbox://mapbox.mapbox-terrain-dem-v1',
-              tileSize: 512,
-              maxzoom: 14,
-            });
-          }
-          map.current?.setTerrain({ source: 'mapbox-dem', exaggeration: 1.5 });
-        } else {
-          map.current?.setTerrain(null);
-        }
       }
     });
   }, [layers, mapLoaded, styleVersion]);
@@ -572,6 +558,22 @@ export default function RiskMap({
           map={map.current}
           visible={fireHistory?.visible ?? false}
           opacity={fireHistory?.opacity ?? 0.7}
+        />
+      )}
+      {mapLoaded && (
+        <VegetationLayer
+          key={`veg-${styleVersion}`}
+          map={map.current}
+          visible={vegetation?.visible ?? false}
+          opacity={vegetation?.opacity ?? 0.6}
+        />
+      )}
+      {mapLoaded && (
+        <SlopeLayer
+          key={`slope-${styleVersion}`}
+          map={map.current}
+          visible={terrain?.visible ?? false}
+          opacity={terrain?.opacity ?? 0.5}
         />
       )}
       {markerElements}

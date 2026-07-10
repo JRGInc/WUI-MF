@@ -9,33 +9,76 @@ interface FireHistoryLayerProps {
   opacity?: number;
 }
 
-// Sample fire history data (would be fetched from CalFire API in production)
-const SAMPLE_FIRE_DATA: GeoJSON.FeatureCollection = {
+// CAL FIRE (FRAP) statewide fire perimeters, hosted as a public ArcGIS
+// FeatureServer. Layer 1 is the historic-perimeters layer; it answers
+// anonymous `f=geojson` queries, so we can feed it straight into a Mapbox
+// GeoJSON source. See the CLAUDE.md note on the snake_case boundary — the
+// service uses ArcGIS field names (YEAR_, FIRE_NAME, GIS_ACRES) that we
+// normalize to the camelCase props the paint/label expressions expect.
+const CALFIRE_PERIMETERS_QUERY_URL =
+  'https://services2.arcgis.com/cFEFS0EWrhfDeVw9/arcgis/rest/services/California_Fire_Perimeters/FeatureServer/1/query';
+
+// Below this zoom the viewport bbox covers too much of the state — the query
+// would blow past the service's 2000-record cap and return a huge payload for
+// little visual value. We clear the layer instead.
+const MIN_FETCH_ZOOM = 7;
+// Cap how far back we pull, to keep payloads reasonable in dense fire regions.
+const MIN_YEAR = 1990;
+// The service's maxRecordCount (confirmed via the layer metadata).
+const MAX_RECORDS = 2000;
+// Debounce viewport-change refetches so a pan/zoom gesture triggers one call.
+const REFETCH_DEBOUNCE_MS = 500;
+
+const EMPTY_FC: GeoJSON.FeatureCollection = {
   type: 'FeatureCollection',
-  features: [
-    {
-      type: 'Feature',
-      properties: {
-        name: 'Sample Fire 2023',
-        year: 2023,
-        acres: 5000,
-        cause: 'Lightning',
-      },
-      geometry: {
-        type: 'Polygon',
-        coordinates: [
-          [
-            [-118.3, 34.1],
-            [-118.2, 34.1],
-            [-118.2, 34.0],
-            [-118.3, 34.0],
-            [-118.3, 34.1],
-          ],
-        ],
-      },
-    },
-  ],
+  features: [],
 };
+
+// Fetch CAL FIRE perimeters intersecting `bounds`, normalized to the props the
+// layers below render. Throws on a non-OK response so callers can fall back to
+// whatever is already on the map (important offline / in the field).
+async function fetchFireHistoryData(
+  bounds: mapboxgl.LngLatBounds,
+  signal?: AbortSignal
+): Promise<GeoJSON.FeatureCollection> {
+  const params = new URLSearchParams({
+    where: `YEAR_ >= '${MIN_YEAR}'`,
+    geometry: `${bounds.getWest()},${bounds.getSouth()},${bounds.getEast()},${bounds.getNorth()}`,
+    geometryType: 'esriGeometryEnvelope',
+    inSR: '4326',
+    spatialRel: 'esriSpatialRelIntersects',
+    outFields: 'YEAR_,FIRE_NAME,GIS_ACRES,CAUSE,ALARM_DATE',
+    outSR: '4326',
+    returnGeometry: 'true',
+    geometryPrecision: '5', // trim coordinate decimals to shrink the payload
+    resultRecordCount: String(MAX_RECORDS),
+    f: 'geojson',
+  });
+
+  const response = await fetch(`${CALFIRE_PERIMETERS_QUERY_URL}?${params.toString()}`, {
+    signal,
+  });
+  if (!response.ok) {
+    throw new Error(`CAL FIRE request failed: ${response.status}`);
+  }
+
+  const raw = (await response.json()) as GeoJSON.FeatureCollection;
+  const features = (raw.features ?? []).map((feature) => {
+    const p = (feature.properties ?? {}) as Record<string, unknown>;
+    return {
+      ...feature,
+      properties: {
+        name: (p.FIRE_NAME as string)?.trim() || 'Unnamed fire',
+        // YEAR_ is a string field in the service; coerce for the color ramp.
+        year: Number(p.YEAR_) || 0,
+        acres: Math.round((p.GIS_ACRES as number) ?? 0),
+        cause: p.CAUSE ?? null,
+      },
+    };
+  });
+
+  return { type: 'FeatureCollection', features };
+}
 
 export function FireHistoryLayer({
   map,
@@ -48,6 +91,10 @@ export function FireHistoryLayer({
   visibleRef.current = visible;
   const opacityRef = useRef(opacity);
   opacityRef.current = opacity;
+  // Most recently fetched perimeters. Kept in a ref so addLayer (which may be
+  // deferred to style.load) seeds the source with whatever we already have,
+  // and so a style switch that rebuilds the source doesn't lose the data.
+  const dataRef = useRef<GeoJSON.FeatureCollection>(EMPTY_FC);
 
   useEffect(() => {
     if (!map) return;
@@ -58,7 +105,7 @@ export function FireHistoryLayer({
       if (!map.getSource('fire-history')) {
         map.addSource('fire-history', {
           type: 'geojson',
-          data: SAMPLE_FIRE_DATA,
+          data: dataRef.current,
         });
       }
 
@@ -74,12 +121,12 @@ export function FireHistoryLayer({
               'interpolate',
               ['linear'],
               ['get', 'year'],
-              2015,
+              1990,
               '#fde68a',
-              2018,
-              '#fb923c',
-              2021,
-              '#ef4444',
+              2005,
+              '#fbbf24',
+              2015,
+              '#f97316',
               2024,
               '#7f1d1d',
             ],
@@ -97,7 +144,7 @@ export function FireHistoryLayer({
           layout: { visibility },
           paint: {
             'line-color': '#7f1d1d',
-            'line-width': 2,
+            'line-width': 1,
           },
         });
       }
@@ -108,9 +155,16 @@ export function FireHistoryLayer({
           id: 'fire-history-labels',
           type: 'symbol',
           source: 'fire-history',
+          minzoom: 9, // avoid label clutter when zoomed out
           layout: {
             visibility,
-            'text-field': ['concat', ['get', 'name'], '\n', ['get', 'acres'], ' acres'],
+            'text-field': [
+              'concat',
+              ['get', 'name'],
+              ' (',
+              ['to-string', ['get', 'year']],
+              ')',
+            ],
             'text-size': 12,
             'text-anchor': 'center',
           },
@@ -127,20 +181,72 @@ export function FireHistoryLayer({
 
     return () => {
       cancel();
-      if (map.getLayer('fire-history-fill')) {
-        map.removeLayer('fire-history-fill');
+      if (map.getLayer('fire-history-labels')) {
+        map.removeLayer('fire-history-labels');
       }
       if (map.getLayer('fire-history-outline')) {
         map.removeLayer('fire-history-outline');
       }
-      if (map.getLayer('fire-history-labels')) {
-        map.removeLayer('fire-history-labels');
+      if (map.getLayer('fire-history-fill')) {
+        map.removeLayer('fire-history-fill');
       }
       if (map.getSource('fire-history')) {
         map.removeSource('fire-history');
       }
     };
   }, [map]);
+
+  // Fetch live CAL FIRE perimeters for the current viewport whenever the layer
+  // is visible, and refetch (debounced) as the user pans/zooms. Only runs while
+  // visible, so hidden layers cost no network — matters offline in the field.
+  useEffect(() => {
+    if (!map || !visible) return;
+
+    const controller = new AbortController();
+    let debounce: ReturnType<typeof setTimeout> | undefined;
+
+    const applyData = (data: GeoJSON.FeatureCollection) => {
+      dataRef.current = data;
+      const source = map.getSource('fire-history') as
+        | mapboxgl.GeoJSONSource
+        | undefined;
+      // If the source isn't ready yet (addLayer deferred to style.load),
+      // dataRef seeds it when it is created.
+      source?.setData(data);
+    };
+
+    const load = async () => {
+      if (map.getZoom() < MIN_FETCH_ZOOM) {
+        applyData(EMPTY_FC);
+        return;
+      }
+      const bounds = map.getBounds();
+      if (!bounds) return;
+      try {
+        const data = await fetchFireHistoryData(bounds, controller.signal);
+        applyData(data);
+      } catch (error) {
+        // Offline or a service hiccup: keep whatever is already displayed.
+        if ((error as Error).name !== 'AbortError') {
+          console.warn('Failed to load CAL FIRE fire history:', error);
+        }
+      }
+    };
+
+    const onMoveEnd = () => {
+      clearTimeout(debounce);
+      debounce = setTimeout(() => void load(), REFETCH_DEBOUNCE_MS);
+    };
+
+    void load();
+    map.on('moveend', onMoveEnd);
+
+    return () => {
+      controller.abort();
+      clearTimeout(debounce);
+      map.off('moveend', onMoveEnd);
+    };
+  }, [map, visible]);
 
   // Update visibility
   useEffect(() => {
@@ -172,14 +278,4 @@ export function FireHistoryLayer({
   }, [map, opacity]);
 
   return null;
-}
-
-// Utility function to fetch real fire history data
-export async function fetchFireHistoryData(
-  _bounds: mapboxgl.LngLatBounds
-): Promise<GeoJSON.FeatureCollection> {
-  // In production, this would fetch from CalFire API
-  // Example: https://services1.arcgis.com/jUJYIo9tSQP5EBKK/arcgis/rest/services/California_Fire_Perimeters/FeatureServer
-
-  return SAMPLE_FIRE_DATA;
 }
