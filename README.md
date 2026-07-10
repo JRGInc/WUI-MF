@@ -146,6 +146,75 @@ Notes:
 - All layer fetches are visibility-gated (no network when a layer is off) and
   fail gracefully offline, keeping whatever is already drawn.
 
+## Computer vision
+
+On-device inference runs in the browser with **TensorFlow.js** on its default
+backend (WebGL). Models are fetched once, then cached in IndexedDB via TF.js's
+`indexeddb://` scheme so later loads are offline; the service worker
+additionally caches `.wasm`/`.tflite` assets. Code lives in
+`src/features/computer-vision/`.
+
+### Two runtime pipelines
+
+| Pipeline | Entry | Model | Input | IndexedDB cache key |
+| -------- | ----- | ----- | ----- | ------------------- |
+| **Still assessment photos** | `useImageAnalysis` (assessment `PhotoCaptureStep`, `ImageAnalyzer`) | DeepLab v3 **ADE20K** semantic segmentation | 513² | `indexeddb://deeplab-ade20k-q2` |
+| **Live AR scan** | `useLiveFrameAnalysis` → `useFrameAnalysisLoop` → `getActiveAnalyzer()` (`ARViewer`) | DeepLab ADE20K (default) **or** YOLO11n-seg COCO (opt-in prototype) | 513² / 512² | `…deeplab-ade20k-q2` / `indexeddb://yolo11n-seg-coco-512` |
+
+The live loop's analyzer is selectable at runtime for A/B latency tests:
+`?cvModel=yolo` in the URL, or `localStorage['cv-model'] = 'yolo'`; otherwise it
+defaults to DeepLab (`frameAnalyzer.ts`).
+
+The DeepLab path produces an ADE20K class map, which `vegetationSegmenter.ts`
+turns into `DetectedRisk`s via helpers: `coverageOf`, `hasGroundFuel`,
+`vegToStructureProximity`, `classBoundingBoxes`, and `risksFromClassMap`.
+
+> **Note — legacy scaffolding, not imported anywhere:**
+> `services/inferenceService.ts` (an `InferenceService` class with
+> `runVegetationSegmentation` / `runRoofClassification` / `runDebrisDetection` /
+> `analyzeCompleteImage`) and `hooks/useModelLoader.ts` (which selects a
+> `webgpu → webgl → wasm → cpu` backend) both have no importers. The live code
+> paths are the two pipelines above; treat these as reference, not the active
+> API. (A future task could route the active pipelines through the WebGPU-
+> preferring loader.)
+
+### Hazard taxonomy
+
+The label taxonomy is a single source of truth — `HAZARD_TAGS` in
+`src/shared/types/index.ts` — **11 hazard classes** plus a `no-hazards-visible`
+negative tag: `dry-dead-vegetation`, `ground-fuels`, `overhanging-vegetation`,
+`vegetation-near-structure`, `woodpile-lumber`, `propane-tank`,
+`wood-shake-roof`, `roof-debris`, `gutter-debris`, `combustible-fence`,
+`combustible-mulch`. Class indices 0–8 are frozen (the last two were appended)
+so already-labeled data stays valid. The training scripts parse `HAZARD_TAGS`
+directly rather than duplicating the list.
+
+### Training-data & labeling workflow
+
+Custom (YOLO-seg) models are trained out-of-band; the scripts prepare data for
+labeling and convert the result back for the browser:
+
+1. **Gather images** into the training pool (`training-data/`):
+   - `node scripts/harvest-images.mjs` — scrape commercially-usable
+     (CC0 / PDM / CC BY) WUI-hazard photos from Wikimedia Commons + Openverse.
+   - `npm run import:photos` — import a local folder of field photos
+     (imported as triage `keep`).
+   - `npm run export:training` — pull **training-consented** assessment photos
+     from Supabase into a YOLO dataset layout (uses `SUPABASE_SERVICE_ROLE_KEY`
+     if set, else the anon key).
+2. `npm run label:prepare` — build a **SAM-assisted** labeling bundle from the
+   triaged-keep pool: `classes.txt`, Ultralytics `dataset.yaml`, and a
+   Label-Studio PolygonLabels config + tasks (tool-agnostic; also works with
+   CVAT / Roboflow).
+3. **Label** the instance masks (self-hosted CVAT + GPU SAM in this project's
+   setup). `scripts/make-labeling-examples.py` generates the good-vs-loose mask
+   example for the labeling guide.
+4. **Train** YOLO11n-seg (Ultralytics), then
+   `scripts/export-yolo-tfjs.sh` converts it to a TF.js graph model
+   (PyTorch → ONNX → TF SavedModel → TF.js) for the browser. `imgsz` must match
+   `INPUT_SIZE` in `yoloSegmenter.ts`, and the model is served from
+   `/models/yolo11n-seg_web_model/`.
+
 ## Auth — DEV_MODE
 
 `src/app/providers/AuthProvider.tsx` has a top-level `DEV_MODE` flag that
