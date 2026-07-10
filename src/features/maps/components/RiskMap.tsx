@@ -365,6 +365,36 @@ export default function RiskMap({
     }
   }, [userLocation.coords, mapLoaded, hasExplicitCenter, flyTo]);
 
+  // Defensible-space zones are normally drawn around a focused property (tap a
+  // marker or use Locate). If the layer is on but nothing has been focused yet,
+  // draw a preview around the user's location — or the map center — so toggling
+  // the layer always shows something. Guarded by zoneCenterRef so a later
+  // property focus (or GPS jitter) doesn't override it. When the map is about to
+  // auto-center on the first GPS fix, we wait for that fix and draw there, so
+  // the rings land under the recentred view instead of at the old center.
+  useEffect(() => {
+    if (!map.current || !mapLoaded) return;
+    const ds = layers.find((l) => l.id === 'defensible-zones');
+    if (!ds?.visible || zoneCenterRef.current) return;
+
+    if (userLocation.coords) {
+      addDefensibleSpaceZones(userLocation.coords);
+    } else if (hasExplicitCenter || userLocation.error) {
+      // Explicit center, or GPS denied/unavailable — no auto-center is coming,
+      // so draw around the current map center.
+      const c = map.current.getCenter();
+      addDefensibleSpaceZones({ latitude: c.lat, longitude: c.lng });
+    }
+    // else: auto-center to GPS is pending — rerun when the fix (or error) arrives.
+  }, [
+    layers,
+    mapLoaded,
+    userLocation.coords,
+    userLocation.error,
+    hasExplicitCenter,
+    addDefensibleSpaceZones,
+  ]);
+
   // Deep link: /map/:assessmentId focuses that assessment's property.
   useEffect(() => {
     if (!assessmentId || !mapLoaded) return;
