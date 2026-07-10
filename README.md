@@ -145,6 +145,12 @@ Notes:
   vector overlays stay on top.
 - All layer fetches are visibility-gated (no network when a layer is off) and
   fail gracefully offline, keeping whatever is already drawn.
+- **Defensible Space** is drawn around a *focused* property — tap a property
+  marker, use the Locate button, or open the map from an assessment. When the
+  layer is on but nothing is focused yet, it falls back to drawing the rings
+  around the user's GPS location (or the map center if location is denied), so
+  toggling it always shows something. The rings are a real 100 ft buffer, so
+  they appear small until you zoom in (a property tap flies to zoom 17).
 
 ## Computer vision
 
