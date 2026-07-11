@@ -77,7 +77,8 @@ export function PropertyMarker({
       .marker-label {
         margin-top: 4px;
         padding: 2px 8px;
-        background: white;
+        background: #ffffff;
+        color: #1f2937;
         border-radius: 4px;
         font-size: 12px;
         font-weight: 500;
