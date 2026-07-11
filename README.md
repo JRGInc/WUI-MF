@@ -131,26 +131,41 @@ by a live, public, no-cost data source (only the Mapbox token is required):
 
 | Layer               | Source                                   | Coverage | How it's consumed |
 | ------------------- | ---------------------------------------- | -------- | ----------------- |
-| **Fire History**    | CAL FIRE (FRAP) fire perimeters, ArcGIS FeatureServer | California | Viewport bbox query (`f=geojson`), refetched on pan/zoom → GeoJSON source |
+| **Fire History**    | CAL FIRE (FRAP) in CA + NIFC InterAgencyFirePerimeterHistory nationally, ArcGIS FeatureServers | US | Viewport bbox query (`f=geojson`), refetched on pan/zoom → GeoJSON source |
 | **Vegetation/Fuel** | LANDFIRE Scott & Burgan 40 fuel models (USGS/USFS WMS) | CONUS    | WMS `GetMap` raster tiles (EPSG:3857) |
 | **Slope Analysis**  | USGS 3DEP elevation, "Slope Map" rendering rule (ArcGIS ImageServer) | CONUS (+HI/territories) | `exportImage` raster tiles (EPSG:3857) |
-| **Defensible Space**| Computed per-property (0–5 / 5–30 / 30–100 ft rings per CAL FIRE PRC 4291) | Any      | Local GeoJSON buffers |
+| **Defensible Space**| Building footprint buffered 5 / 30 / 100 ft (per CAL FIRE PRC 4291); circle fallback | US | `@turf/buffer` over the Mapbox building footprint → GeoJSON |
 
 Notes:
-- Fire History is **California-only** (CAL FIRE's dataset); it renders nothing
-  outside CA and only fetches at zoom ≥ 7 to respect the service's 2000-record
-  cap.
+- **Fire History is hybrid**: the source is chosen per viewport — CAL FIRE
+  (FRAP) when the whole view sits inside California (most CA-current data),
+  otherwise NIFC's national history. NIFC already includes CalFire data, so a
+  border-straddling view still shows CA fires (from NIFC) with no duplicate
+  perimeters. Both are bbox-limited and only fetch at zoom ≥ 7 (2000-record
+  cap). Field mapping differs per source (`FIRE_NAME`/`YEAR_` vs
+  `INCIDENT`/`FIRE_YEAR_INT`), normalized to `name`/`year`/`acres`.
 - The raster overlays (Vegetation, Slope) request Web Mercator tiles via
   Mapbox's `{bbox-epsg-3857}` token and sit beneath base-map labels so the
   vector overlays stay on top.
 - All layer fetches are visibility-gated (no network when a layer is off) and
   fail gracefully offline, keeping whatever is already drawn.
 - **Defensible Space** is drawn around a *focused* property — tap a property
-  marker, use the Locate button, or open the map from an assessment. When the
-  layer is on but nothing is focused yet, it falls back to drawing the rings
-  around the user's GPS location (or the map center if location is denied), so
-  toggling it always shows something. The rings are a real 100 ft buffer, so
-  they appear small until you zoom in (a property tap flies to zoom 17).
+  marker, use the Locate button, select a property (below), or open the map
+  from an assessment. When the layer is on but nothing is focused yet, it falls
+  back to the user's GPS location (or map center if location is denied), so
+  toggling it always shows something. Circles draw instantly, then — once the
+  map settles at zoom 17 — the zones **upgrade to the building's outline**: the
+  Mapbox building footprint under the point is buffered outward 5 / 30 / 100 ft
+  (`@turf/buffer`). Where no footprint exists (rural areas, low zoom, missing
+  map data) the circles remain. The rings are a real 100 ft buffer, so they
+  look small until you zoom in.
+- **Legend**: a per-layer key (`MapLegend`) shows one card per *visible* layer,
+  bottom-left — a layer's key appears only while that layer is on. The
+  Vegetation key is representative (LANDFIRE FBFM40 has 40 classes).
+- **Location on iOS**: WebKit only shows the geolocation prompt for a
+  gesture-initiated request, so the map auto-attempt on load is silently
+  ignored there. Tap the **Locate** button or the **Enable location** banner
+  (mirrors the AR view's "Enable AR positioning" tap) to trigger the prompt.
 
 ### Selecting a property
 
