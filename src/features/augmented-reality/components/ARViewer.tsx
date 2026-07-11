@@ -19,6 +19,7 @@ import { useGeoPose } from '../hooks/useGeoPose';
 import { useAnnotations } from '@/features/maps/hooks/useAnnotations';
 import { useLiveFrameAnalysis } from '@/features/computer-vision/hooks/useLiveFrameAnalysis';
 import { addFindingToAssessment } from '@/shared/services/offlineStorage';
+import { circleZoneFeatures } from '@/shared/utils/defensibleZones';
 import { track } from '@/shared/services/analytics';
 import { showSuccessToast, showErrorToast } from '@/shared/stores/toastStore';
 import type {
@@ -74,6 +75,22 @@ export default function ARViewer() {
   const [arDraftTitle, setArDraftTitle] = useState('');
   const [arDraftType, setArDraftType] = useState<AnnotationType>('risk-marker');
   const [arDraftRisk, setArDraftRisk] = useState<RiskLevel>('high');
+
+  // Defensible-space zones in AR. Stamp the structure center from the first XR
+  // GPS fix ("stand at the structure"), then build the shared zone geometry.
+  // TODO: source the real building footprint (Mapbox Tilequery) for
+  // shape-following zones, and add an explicit "set / nudge structure" control —
+  // for now this draws the circle fallback around where the user stood.
+  const [arZoneCenter, setArZoneCenter] = useState<GeoCoordinates | null>(null);
+  useEffect(() => {
+    if (useXR && xrGeoPose.coords && !arZoneCenter) {
+      setArZoneCenter(xrGeoPose.coords);
+    }
+  }, [useXR, xrGeoPose.coords, arZoneCenter]);
+  const defensibleZones = useMemo(
+    () => (arZoneCenter ? circleZoneFeatures(arZoneCenter) : []),
+    [arZoneCenter]
+  );
 
   const handleSaveArAnnotation = useCallback(async () => {
     if (!pendingArCoords) return;
@@ -190,6 +207,7 @@ export default function ARViewer() {
           onScanState={setXrScanState}
           geoAnnotations={geoAnnotations}
           geoPose={xrGeoPose}
+          defensibleZones={defensibleZones}
         />
       ) : (
         <CameraFallback

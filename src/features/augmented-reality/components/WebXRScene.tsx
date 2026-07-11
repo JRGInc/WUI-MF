@@ -8,12 +8,22 @@ import { useFrameAnalysisLoop } from '@/features/computer-vision/hooks/useFrameA
 import { geoToEnu, enuToThree } from '../utils/geoEnu';
 import { makeMarkerSprite, disposeMarkerSprite } from '../utils/markerSprite';
 import { annotationRisk } from '@/shared/utils/annotationStyle';
+import { zoneOuterRing } from '@/shared/utils/defensibleZones';
 import type { GeoPose } from '../hooks/useGeoPose';
 import type { DetectedRisk, MapAnnotation } from '@/shared/types';
 
 // XR markers nearer/farther than this are depth-clamped (XR far plane is 50 m).
 const XR_MIN_DIST = 2;
 const XR_MAX_DIST = 40;
+
+// Defensible-space zone outline colors (match the map + legend).
+const ZONE_COLORS: Record<number, number> = { 0: 0xef4444, 1: 0xf97316, 2: 0xeab308 };
+
+interface ZoneLine {
+  line: THREE.LineLoop;
+  ring: number[][]; // lng/lat pairs, re-projected to floor coords each frame
+  positions: Float32Array;
+}
 
 interface WebXRSceneProps {
   domOverlayRoot: HTMLElement | null;
@@ -28,6 +38,11 @@ interface WebXRSceneProps {
   // heading. Accuracy is GPS/compass-bound and depends on orientation permission.
   geoAnnotations?: MapAnnotation[];
   geoPose?: GeoPose;
+  // Defensible-space zone polygons (GeoJSON, `zone` property 0/1/2) from the
+  // shared `footprintZoneFeatures`/`circleZoneFeatures`. Drawn as ground outlines
+  // on the local-floor plane, projected from the device GPS fix and yaw-aligned
+  // to the compass — same bridge as the geo markers. Reuses the map's geometry.
+  defensibleZones?: GeoJSON.Feature[];
 }
 
 export function WebXRScene({
@@ -39,6 +54,7 @@ export function WebXRScene({
   onScanState,
   geoAnnotations,
   geoPose,
+  defensibleZones,
 }: WebXRSceneProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
@@ -55,6 +71,11 @@ export function WebXRScene({
   const geoMarkersRef = useRef<{ sprite: THREE.Sprite; annotation: MapAnnotation }[]>([]);
   const geoPoseRef = useRef<GeoPose | undefined>(geoPose);
   geoPoseRef.current = geoPose;
+
+  // Defensible-space zone outlines: a yaw-aligned group of LineLoops whose
+  // vertices are re-projected from the GPS fix each frame (same as geo markers).
+  const zonesGroupRef = useRef<THREE.Group | null>(null);
+  const zoneLinesRef = useRef<ZoneLine[]>([]);
 
   const { isSupported, session, referenceSpace, startSession, endSession } = useWebXR();
   const measurement = useARMeasurement();
@@ -131,12 +152,16 @@ export function WebXRScene({
     const geoGroup = new THREE.Group();
     scene.add(geoGroup);
 
+    const zonesGroup = new THREE.Group();
+    scene.add(zonesGroup);
+
     rendererRef.current = renderer;
     sceneRef.current = scene;
     cameraRef.current = camera;
     reticleRef.current = reticle;
     lineRef.current = line;
     geoGroupRef.current = geoGroup;
+    zonesGroupRef.current = zonesGroup;
 
     return () => {
       pointMeshesRef.current.forEach((m) => {
@@ -154,6 +179,12 @@ export function WebXRScene({
         disposeMarkerSprite(sprite);
       });
       geoMarkersRef.current = [];
+      zoneLinesRef.current.forEach(({ line: zline }) => {
+        zonesGroup.remove(zline);
+        zline.geometry.dispose();
+        (zline.material as THREE.Material).dispose();
+      });
+      zoneLinesRef.current = [];
       renderer.dispose();
       rendererRef.current = null;
       sceneRef.current = null;
@@ -161,6 +192,7 @@ export function WebXRScene({
       reticleRef.current = null;
       lineRef.current = null;
       geoGroupRef.current = null;
+      zonesGroupRef.current = null;
     };
   }, []);
 
@@ -181,6 +213,38 @@ export function WebXRScene({
       geoMarkersRef.current.push({ sprite, annotation });
     }
   }, [geoAnnotations]);
+
+  // (Re)build zone LineLoops when the zone polygons change. Vertices are filled
+  // in each frame from the live GPS fix (see the render loop).
+  useEffect(() => {
+    const group = zonesGroupRef.current;
+    if (!group) return;
+
+    zoneLinesRef.current.forEach(({ line: zline }) => {
+      group.remove(zline);
+      zline.geometry.dispose();
+      (zline.material as THREE.Material).dispose();
+    });
+    zoneLinesRef.current = [];
+
+    for (const feature of defensibleZones ?? []) {
+      const ring = zoneOuterRing(feature);
+      if (!ring || ring.length < 2) continue;
+      const zone = Number(feature.properties?.zone ?? 2);
+      const positions = new Float32Array(ring.length * 3);
+      const geom = new THREE.BufferGeometry();
+      geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+      const mat = new THREE.LineBasicMaterial({
+        color: ZONE_COLORS[zone] ?? 0xeab308,
+        transparent: true,
+        opacity: 0.95,
+      });
+      const zline = new THREE.LineLoop(geom, mat);
+      zline.frustumCulled = false; // verts are rewritten each frame from GPS
+      group.add(zline);
+      zoneLinesRef.current.push({ line: zline, ring, positions });
+    }
+  }, [defensibleZones]);
 
   // --- Start the XR session ---
   useEffect(() => {
@@ -266,6 +330,27 @@ export function WebXRScene({
         if (pose.heading !== null) {
           const camYaw = new THREE.Euler().setFromQuaternion(camera.quaternion, 'YXZ').y;
           group.rotation.y = camYaw + THREE.MathUtils.degToRad(pose.heading);
+        }
+      }
+
+      // Defensible-space zones: re-project each ring vertex onto the floor plane
+      // (local-floor → y = 0) from the current GPS fix, and yaw-align the group
+      // like the markers. The zone outlines follow the building footprint.
+      const zGroup = zonesGroupRef.current;
+      if (zGroup && pose?.coords && zoneLinesRef.current.length > 0) {
+        for (const { line: zline, ring, positions } of zoneLinesRef.current) {
+          for (let i = 0; i < ring.length; i++) {
+            const enu = geoToEnu(pose.coords, { latitude: ring[i][1], longitude: ring[i][0] });
+            const p = enuToThree({ east: enu.east, north: enu.north, up: 0 }, 0);
+            positions[i * 3] = p.x;
+            positions[i * 3 + 1] = 0; // local-floor reference space: y = 0 is the floor
+            positions[i * 3 + 2] = p.z;
+          }
+          (zline.geometry.getAttribute('position') as THREE.BufferAttribute).needsUpdate = true;
+        }
+        if (pose.heading !== null) {
+          const camYaw = new THREE.Euler().setFromQuaternion(camera.quaternion, 'YXZ').y;
+          zGroup.rotation.y = camYaw + THREE.MathUtils.degToRad(pose.heading);
         }
       }
 
