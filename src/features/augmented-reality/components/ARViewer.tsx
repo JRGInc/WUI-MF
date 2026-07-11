@@ -19,7 +19,8 @@ import { useGeoPose } from '../hooks/useGeoPose';
 import { useAnnotations } from '@/features/maps/hooks/useAnnotations';
 import { useLiveFrameAnalysis } from '@/features/computer-vision/hooks/useLiveFrameAnalysis';
 import { addFindingToAssessment } from '@/shared/services/offlineStorage';
-import { circleZoneFeatures } from '@/shared/utils/defensibleZones';
+import { circleZoneFeatures, footprintZoneFeatures } from '@/shared/utils/defensibleZones';
+import { fetchBuildingFootprint } from '@/shared/utils/buildingFootprint';
 import { track } from '@/shared/services/analytics';
 import { showSuccessToast, showErrorToast } from '@/shared/stores/toastStore';
 import type {
@@ -34,6 +35,7 @@ import type {
 type ARMode = 'camera-overlay' | '3d-model' | 'measurement';
 
 const SCAN_INTERVAL_MS = 2500;
+const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN || '';
 
 // Best-effort map from a CV detection's free-form `type` to a risk category for
 // the persisted Finding. Defaults to vegetation (the dominant detector class).
@@ -77,20 +79,40 @@ export default function ARViewer() {
   const [arDraftRisk, setArDraftRisk] = useState<RiskLevel>('high');
 
   // Defensible-space zones in AR. Stamp the structure center from the first XR
-  // GPS fix ("stand at the structure"), then build the shared zone geometry.
-  // TODO: source the real building footprint (Mapbox Tilequery) for
-  // shape-following zones, and add an explicit "set / nudge structure" control —
-  // for now this draws the circle fallback around where the user stood.
+  // GPS fix ("stand at the structure"), draw the circle fallback immediately,
+  // then upgrade to the real building footprint (fetched from the Mapbox vector
+  // tile) so the zones follow the structure outline — same geometry as the map.
+  // TODO: an explicit "set / nudge structure" control to refine the center.
   const [arZoneCenter, setArZoneCenter] = useState<GeoCoordinates | null>(null);
+  const [defensibleZones, setDefensibleZones] = useState<GeoJSON.Feature[]>([]);
   useEffect(() => {
     if (useXR && xrGeoPose.coords && !arZoneCenter) {
       setArZoneCenter(xrGeoPose.coords);
     }
   }, [useXR, xrGeoPose.coords, arZoneCenter]);
-  const defensibleZones = useMemo(
-    () => (arZoneCenter ? circleZoneFeatures(arZoneCenter) : []),
-    [arZoneCenter]
-  );
+  useEffect(() => {
+    if (!arZoneCenter) {
+      setDefensibleZones([]);
+      return;
+    }
+    setDefensibleZones(circleZoneFeatures(arZoneCenter)); // instant fallback
+    const controller = new AbortController();
+    (async () => {
+      try {
+        const footprint = await fetchBuildingFootprint(
+          arZoneCenter,
+          MAPBOX_TOKEN,
+          controller.signal
+        );
+        if (!footprint) return; // no footprint here — keep the circles
+        const zones = footprintZoneFeatures(footprint);
+        if (zones.length) setDefensibleZones(zones);
+      } catch {
+        // offline / fetch failure — the circle fallback stays
+      }
+    })();
+    return () => controller.abort();
+  }, [arZoneCenter]);
 
   const handleSaveArAnnotation = useCallback(async () => {
     if (!pendingArCoords) return;
