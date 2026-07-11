@@ -27,6 +27,7 @@ import { FireHistoryLayer } from './FireHistoryLayer';
 import { VegetationLayer } from './VegetationLayer';
 import { SlopeLayer } from './SlopeLayer';
 import { MapControls, LayerToggle } from './MapControls';
+import { MapLegend } from './MapLegend';
 import { UserLocationMarker } from './UserLocationMarker';
 import { UserAccuracyCircle } from './UserAccuracyCircle';
 import { useAnnotations } from '../hooks/useAnnotations';
@@ -881,26 +882,8 @@ export default function RiskMap({
         </div>
       )}
 
-      {/* Legend */}
-      <div className="absolute bottom-4 left-4 z-10 bg-white dark:bg-gray-800 rounded-lg shadow-lg p-3">
-        <h3 className="text-xs font-medium text-gray-900 dark:text-white mb-2">
-          Defensible Space Zones
-        </h3>
-        <div className="space-y-1.5">
-          <div className="flex items-center gap-2">
-            <div className="w-4 h-4 rounded bg-red-500/30 border border-red-500" />
-            <span className="text-xs text-gray-600 dark:text-gray-400">Zone 0 (0-5 ft)</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="w-4 h-4 rounded bg-orange-500/20 border border-orange-500" />
-            <span className="text-xs text-gray-600 dark:text-gray-400">Zone 1 (5-30 ft)</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="w-4 h-4 rounded bg-yellow-500/15 border border-yellow-500" />
-            <span className="text-xs text-gray-600 dark:text-gray-400">Zone 2 (30-100 ft)</span>
-          </div>
-        </div>
-      </div>
+      {/* Per-layer legend — a key appears only while its layer is visible */}
+      <MapLegend layers={layers} />
 
       {/* Place-marker toggle (only when opened from an assessment) */}
       {showControls && assessmentId && (
