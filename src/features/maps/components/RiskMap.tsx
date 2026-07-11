@@ -30,6 +30,7 @@ import { MapControls, LayerToggle } from './MapControls';
 import { UserLocationMarker } from './UserLocationMarker';
 import { UserAccuracyCircle } from './UserAccuracyCircle';
 import { useAnnotations } from '../hooks/useAnnotations';
+import buffer from '@turf/buffer';
 import { createCircleFeature } from '../utils/geo';
 import type {
   AnnotationType,
@@ -49,6 +50,65 @@ function getRiskLevelFromScore(score: number): RiskLevel {
   if (score >= 6) return 'moderate';
   if (score >= 4) return 'high';
   return 'extreme';
+}
+
+// Defensible-space zones, outward from the structure (feet).
+const DEFENSIBLE_ZONE_SPECS = [
+  { zone: 0, radiusFeet: 5 },
+  { zone: 1, radiusFeet: 30 },
+  { zone: 2, radiusFeet: 100 },
+] as const;
+
+// Concentric-circle zones around a point — the fallback used when no building
+// footprint is available (rural properties, low zoom, or missing map data).
+function circleZoneFeatures(center: GeoCoordinates): GeoJSON.Feature[] {
+  return DEFENSIBLE_ZONE_SPECS.map(({ zone, radiusFeet }) =>
+    createCircleFeature(center, radiusFeet * 0.3048, { zone })
+  ).reverse(); // largest first, so smaller/brighter zones render on top
+}
+
+// Structure-shaped zones: buffer the building footprint outward by each zone
+// distance so the rings follow the building outline instead of a circle.
+function footprintZoneFeatures(footprint: GeoJSON.Feature): GeoJSON.Feature[] {
+  const out: GeoJSON.Feature[] = [];
+  for (const { zone, radiusFeet } of DEFENSIBLE_ZONE_SPECS) {
+    const buffered = buffer(
+      footprint as GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>,
+      radiusFeet,
+      { units: 'feet' }
+    );
+    if (!buffered) return []; // degenerate geometry — signal caller to keep circles
+    out.push({ ...(buffered as GeoJSON.Feature), properties: { zone } });
+  }
+  return out.reverse();
+}
+
+// The Mapbox building footprint rendered under a point, if any. Only returns a
+// result once the building layer is painted (~zoom 15+), so callers query after
+// the map settles.
+function buildingFootprintAt(
+  map: mapboxgl.Map,
+  coords: GeoCoordinates
+): GeoJSON.Feature | null {
+  const p = map.project([coords.longitude, coords.latitude]);
+  const pad = 12; // small pixel box, to catch a footprint the point sits just off
+  let feats;
+  try {
+    feats = map.queryRenderedFeatures([
+      [p.x - pad, p.y - pad],
+      [p.x + pad, p.y + pad],
+    ]);
+  } catch {
+    return null;
+  }
+  const building = feats.find(
+    (f) =>
+      f.sourceLayer === 'building' &&
+      (f.geometry.type === 'Polygon' || f.geometry.type === 'MultiPolygon')
+  );
+  return building
+    ? { type: 'Feature', properties: {}, geometry: building.geometry }
+    : null;
 }
 
 // Swatch colors for the layer toggle list.
@@ -324,29 +384,36 @@ export default function RiskMap({
 
   const addDefensibleSpaceZones = useCallback(
     (center: GeoCoordinates) => {
-      if (!map.current) return;
+      const m = map.current;
+      if (!m) return;
 
-      const source = map.current.getSource('defensible-zones') as mapboxgl.GeoJSONSource;
+      const source = m.getSource('defensible-zones') as mapboxgl.GeoJSONSource;
       if (!source) return;
 
       zoneCenterRef.current = center;
 
-      // Create concentric circles for defensible space zones
-      const zones = [
-        { zone: 0, radiusFeet: 5 },
-        { zone: 1, radiusFeet: 30 },
-        { zone: 2, radiusFeet: 100 },
-      ];
+      // Instant feedback with circles, then upgrade to the building's actual
+      // shape once footprints are queryable (after any fly animation settles).
+      source.setData({ type: 'FeatureCollection', features: circleZoneFeatures(center) });
 
-      const features = zones.map(({ zone, radiusFeet }) => {
-        const radiusMeters = radiusFeet * 0.3048;
-        return createCircleFeature(center, radiusMeters, { zone });
-      });
+      const upgradeToFootprint = () => {
+        const map2 = map.current;
+        // Bail if a newer selection has superseded this one.
+        if (!map2 || zoneCenterRef.current !== center) return;
+        const footprint = buildingFootprintAt(map2, center);
+        if (!footprint) return; // no footprint here — keep the circles
+        const zones = footprintZoneFeatures(footprint);
+        if (zones.length !== DEFENSIBLE_ZONE_SPECS.length) return;
+        const src = map2.getSource('defensible-zones') as mapboxgl.GeoJSONSource | undefined;
+        src?.setData({ type: 'FeatureCollection', features: zones });
+      };
 
-      source.setData({
-        type: 'FeatureCollection',
-        features: features.reverse(), // Render largest first
-      });
+      // Footprints only paint once the map is idle at a high-enough zoom.
+      if (m.isMoving()) {
+        m.once('idle', upgradeToFootprint);
+      } else {
+        upgradeToFootprint();
+      }
     },
     []
   );

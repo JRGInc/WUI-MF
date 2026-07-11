@@ -23,6 +23,7 @@
     "@mapbox/mapbox-gl-geocoder": "^5.0.2",
     "@supabase/supabase-js": "^2.45.0",
     "@tensorflow/tfjs": "^4.20.0",
+    "@turf/buffer": "^7.3.5",
     "dexie": "^4.0.7",
     "dexie-react-hooks": "^1.1.7",
     "framer-motion": "^11.3.0",
