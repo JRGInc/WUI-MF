@@ -418,26 +418,37 @@ export default function RiskMap({
     };
   }, [assessmentId, mapLoaded, propertyMarkers, focusProperty]);
 
+  // Set when the user taps Locate without a fix yet, so the first position that
+  // arrives flies there (rather than only silently seeding the marker).
+  const pendingLocateRef = useRef(false);
+
   const getCurrentLocation = useCallback(() => {
     // The watcher usually has a fresh fix already — use it instantly.
     if (userLocation.coords) {
       focusProperty(userLocation.coords);
       return;
     }
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        focusProperty({
-          latitude: position.coords.latitude,
-          longitude: position.coords.longitude,
-        });
-      },
-      (error) => {
-        console.error('Error getting location:', error);
-        showErrorToast('Location unavailable', 'Could not determine your position.');
-      },
-      { enableHighAccuracy: true }
-    );
-  }, [focusProperty, userLocation.coords]);
+    // Otherwise (re)start the watch from this tap. The user gesture is what
+    // makes iOS/WebKit actually show the permission prompt — an auto-request on
+    // page load is ignored there. Fly to the first fix once it arrives.
+    pendingLocateRef.current = true;
+    userLocation.request();
+  }, [focusProperty, userLocation]);
+
+  // Deliver a pending Locate: fly to the first fix, or toast on failure.
+  useEffect(() => {
+    if (!pendingLocateRef.current) return;
+    if (userLocation.coords) {
+      pendingLocateRef.current = false;
+      focusProperty(userLocation.coords);
+    } else if (userLocation.error) {
+      pendingLocateRef.current = false;
+      showErrorToast(
+        'Location unavailable',
+        'Allow location access in your browser and device settings, then try again.'
+      );
+    }
+  }, [userLocation.coords, userLocation.error, focusProperty]);
 
   const handleResetView = useCallback(() => {
     const initial = initialViewRef.current;
@@ -673,6 +684,22 @@ export default function RiskMap({
             }))}
             onToggle={toggleLayer}
           />
+        </div>
+      )}
+
+      {/* Enable-location prompt. iOS/WebKit only shows the geolocation prompt
+          for a request tied to a user gesture, so surface an explicit tap
+          target (mirrors the AR view's "Enable AR positioning" button). Hidden
+          once we have a fix. */}
+      {showControls && mapLoaded && !userLocation.coords && (
+        <div className="absolute top-16 left-1/2 -translate-x-1/2 z-10">
+          <button
+            onClick={getCurrentLocation}
+            className="flex items-center gap-2 px-3 py-2 rounded-lg bg-fire-600 text-white text-sm font-medium shadow-lg hover:bg-fire-700"
+          >
+            <MapPinIcon className="w-4 h-4" />
+            {userLocation.error ? 'Location off — enable' : 'Enable location'}
+          </button>
         </div>
       )}
 
