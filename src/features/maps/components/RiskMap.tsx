@@ -31,8 +31,11 @@ import { MapLegend } from './MapLegend';
 import { UserLocationMarker } from './UserLocationMarker';
 import { UserAccuracyCircle } from './UserAccuracyCircle';
 import { useAnnotations } from '../hooks/useAnnotations';
-import buffer from '@turf/buffer';
-import { createCircleFeature } from '../utils/geo';
+import {
+  DEFENSIBLE_ZONE_SPECS,
+  circleZoneFeatures,
+  footprintZoneFeatures,
+} from '@/shared/utils/defensibleZones';
 import type {
   AnnotationType,
   GeoCoordinates,
@@ -51,37 +54,6 @@ function getRiskLevelFromScore(score: number): RiskLevel {
   if (score >= 6) return 'moderate';
   if (score >= 4) return 'high';
   return 'extreme';
-}
-
-// Defensible-space zones, outward from the structure (feet).
-const DEFENSIBLE_ZONE_SPECS = [
-  { zone: 0, radiusFeet: 5 },
-  { zone: 1, radiusFeet: 30 },
-  { zone: 2, radiusFeet: 100 },
-] as const;
-
-// Concentric-circle zones around a point — the fallback used when no building
-// footprint is available (rural properties, low zoom, or missing map data).
-function circleZoneFeatures(center: GeoCoordinates): GeoJSON.Feature[] {
-  return DEFENSIBLE_ZONE_SPECS.map(({ zone, radiusFeet }) =>
-    createCircleFeature(center, radiusFeet * 0.3048, { zone })
-  ).reverse(); // largest first, so smaller/brighter zones render on top
-}
-
-// Structure-shaped zones: buffer the building footprint outward by each zone
-// distance so the rings follow the building outline instead of a circle.
-function footprintZoneFeatures(footprint: GeoJSON.Feature): GeoJSON.Feature[] {
-  const out: GeoJSON.Feature[] = [];
-  for (const { zone, radiusFeet } of DEFENSIBLE_ZONE_SPECS) {
-    const buffered = buffer(
-      footprint as GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>,
-      radiusFeet,
-      { units: 'feet' }
-    );
-    if (!buffered) return []; // degenerate geometry — signal caller to keep circles
-    out.push({ ...(buffered as GeoJSON.Feature), properties: { zone } });
-  }
-  return out.reverse();
 }
 
 // The Mapbox building footprint rendered under a point, if any. Only returns a
