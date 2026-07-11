@@ -9,22 +9,13 @@ interface FireHistoryLayerProps {
   opacity?: number;
 }
 
-// CAL FIRE (FRAP) statewide fire perimeters, hosted as a public ArcGIS
-// FeatureServer. Layer 1 is the historic-perimeters layer; it answers
-// anonymous `f=geojson` queries, so we can feed it straight into a Mapbox
-// GeoJSON source. See the CLAUDE.md note on the snake_case boundary — the
-// service uses ArcGIS field names (YEAR_, FIRE_NAME, GIS_ACRES) that we
-// normalize to the camelCase props the paint/label expressions expect.
-const CALFIRE_PERIMETERS_QUERY_URL =
-  'https://services2.arcgis.com/cFEFS0EWrhfDeVw9/arcgis/rest/services/California_Fire_Perimeters/FeatureServer/1/query';
-
-// Below this zoom the viewport bbox covers too much of the state — the query
-// would blow past the service's 2000-record cap and return a huge payload for
-// little visual value. We clear the layer instead.
+// Below this zoom the viewport bbox covers too much area — the query would blow
+// past the service's 2000-record cap and return a huge payload for little
+// visual value. We clear the layer instead.
 const MIN_FETCH_ZOOM = 7;
 // Cap how far back we pull, to keep payloads reasonable in dense fire regions.
 const MIN_YEAR = 1990;
-// The service's maxRecordCount (confirmed via the layer metadata).
+// Both services' maxRecordCount (confirmed via the layer metadata).
 const MAX_RECORDS = 2000;
 // Debounce viewport-change refetches so a pan/zoom gesture triggers one call.
 const REFETCH_DEBOUNCE_MS = 500;
@@ -34,20 +25,80 @@ const EMPTY_FC: GeoJSON.FeatureCollection = {
   features: [],
 };
 
-// Fetch CAL FIRE perimeters intersecting `bounds`, normalized to the props the
-// layers below render. Throws on a non-OK response so callers can fall back to
-// whatever is already on the map (important offline / in the field).
+// A fire-perimeter FeatureServer, normalized to the props the layers render
+// (name / year / acres). Both services answer anonymous `f=geojson` queries and
+// use ArcGIS snake_case field names we map to the camelCase the paint/label
+// expressions expect (see the CLAUDE.md note on the snake_case boundary).
+interface FireSource {
+  label: string;
+  queryUrl: string;
+  where: string;
+  outFields: string;
+  toProps: (p: Record<string, unknown>) => { name: string; year: number; acres: number };
+}
+
+// CAL FIRE (FRAP) statewide perimeters — the most CA-current dataset.
+const CALFIRE_SOURCE: FireSource = {
+  label: 'CAL FIRE',
+  queryUrl:
+    'https://services2.arcgis.com/cFEFS0EWrhfDeVw9/arcgis/rest/services/California_Fire_Perimeters/FeatureServer/1/query',
+  where: `YEAR_ >= '${MIN_YEAR}'`, // YEAR_ is a string field
+  outFields: 'YEAR_,FIRE_NAME,GIS_ACRES',
+  toProps: (p) => ({
+    name: (p.FIRE_NAME as string)?.trim() || 'Unnamed fire',
+    year: Number(p.YEAR_) || 0,
+    acres: Math.round((p.GIS_ACRES as number) ?? 0),
+  }),
+};
+
+// NIFC / WFIGS InterAgencyFirePerimeterHistory — national coverage (and it
+// already includes CalFire data, so CA fires still show near state borders).
+const NIFC_SOURCE: FireSource = {
+  label: 'NIFC',
+  queryUrl:
+    'https://services3.arcgis.com/T4QMspbfLg3qTGWY/arcgis/rest/services/InterAgencyFirePerimeterHistory_All_Years_View/FeatureServer/0/query',
+  where: `FIRE_YEAR_INT >= ${MIN_YEAR}`, // numeric year field
+  outFields: 'INCIDENT,FIRE_YEAR_INT,GIS_ACRES',
+  toProps: (p) => ({
+    name: (p.INCIDENT as string)?.trim() || 'Unnamed fire',
+    year: Number(p.FIRE_YEAR_INT) || 0,
+    acres: Math.round((p.GIS_ACRES as number) ?? 0),
+  }),
+};
+
+// California bounding box. When the whole viewport sits inside it, use CAL FIRE
+// for the most CA-current perimeters; otherwise use NIFC's national history.
+// NIFC includes CalFire data, so a border-straddling view still shows CA fires
+// (sourced from NIFC) — no duplicate perimeters. Caveat: the CA bbox clips
+// slivers of NV/AZ/OR, so a view deep inside CA near those corners could miss a
+// few out-of-state fires; acceptable for a history overlay.
+const CA_BBOX = { west: -124.5, south: 32.5, east: -114.1, north: 42.0 };
+
+function sourceForBounds(bounds: mapboxgl.LngLatBounds): FireSource {
+  const insideCalifornia =
+    bounds.getWest() >= CA_BBOX.west &&
+    bounds.getEast() <= CA_BBOX.east &&
+    bounds.getSouth() >= CA_BBOX.south &&
+    bounds.getNorth() <= CA_BBOX.north;
+  return insideCalifornia ? CALFIRE_SOURCE : NIFC_SOURCE;
+}
+
+// Fetch perimeters intersecting `bounds` from the source appropriate to the
+// region, normalized to the props the layers render. Throws on a non-OK
+// response so callers can fall back to whatever is already on the map
+// (important offline / in the field).
 async function fetchFireHistoryData(
   bounds: mapboxgl.LngLatBounds,
   signal?: AbortSignal
 ): Promise<GeoJSON.FeatureCollection> {
+  const source = sourceForBounds(bounds);
   const params = new URLSearchParams({
-    where: `YEAR_ >= '${MIN_YEAR}'`,
+    where: source.where,
     geometry: `${bounds.getWest()},${bounds.getSouth()},${bounds.getEast()},${bounds.getNorth()}`,
     geometryType: 'esriGeometryEnvelope',
     inSR: '4326',
     spatialRel: 'esriSpatialRelIntersects',
-    outFields: 'YEAR_,FIRE_NAME,GIS_ACRES,CAUSE,ALARM_DATE',
+    outFields: source.outFields,
     outSR: '4326',
     returnGeometry: 'true',
     geometryPrecision: '5', // trim coordinate decimals to shrink the payload
@@ -55,27 +106,16 @@ async function fetchFireHistoryData(
     f: 'geojson',
   });
 
-  const response = await fetch(`${CALFIRE_PERIMETERS_QUERY_URL}?${params.toString()}`, {
-    signal,
-  });
+  const response = await fetch(`${source.queryUrl}?${params.toString()}`, { signal });
   if (!response.ok) {
-    throw new Error(`CAL FIRE request failed: ${response.status}`);
+    throw new Error(`${source.label} request failed: ${response.status}`);
   }
 
   const raw = (await response.json()) as GeoJSON.FeatureCollection;
-  const features = (raw.features ?? []).map((feature) => {
-    const p = (feature.properties ?? {}) as Record<string, unknown>;
-    return {
-      ...feature,
-      properties: {
-        name: (p.FIRE_NAME as string)?.trim() || 'Unnamed fire',
-        // YEAR_ is a string field in the service; coerce for the color ramp.
-        year: Number(p.YEAR_) || 0,
-        acres: Math.round((p.GIS_ACRES as number) ?? 0),
-        cause: p.CAUSE ?? null,
-      },
-    };
-  });
+  const features = (raw.features ?? []).map((feature) => ({
+    ...feature,
+    properties: source.toProps((feature.properties ?? {}) as Record<string, unknown>),
+  }));
 
   return { type: 'FeatureCollection', features };
 }
