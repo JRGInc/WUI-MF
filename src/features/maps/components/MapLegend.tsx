@@ -113,7 +113,7 @@ export function MapLegend({ layers }: { layers: MapLayer[] }) {
     });
 
   return (
-    <div className="absolute bottom-4 left-4 z-10 flex flex-col gap-2 max-h-[70%] overflow-y-auto">
+    <div className="absolute bottom-10 left-4 z-10 flex flex-col gap-2 max-h-[calc(70%-1.5rem)] overflow-y-auto">
       {visible.map((layer) => {
         const isCollapsed = collapsed.has(layer.id);
         return (
