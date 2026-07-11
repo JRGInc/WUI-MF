@@ -107,6 +107,12 @@ is on — stop and switch it off before testing Suites 2, 11, 12.
 | MAP-10 | Place gated to assessment | Open bare `/map` (no assessment). | No "Place marker" button (annotations are assessment-scoped). |
 | MAP-11 | Screenshot | Tap screenshot control. | A PNG of the current map downloads. |
 | MAP-12 | Share | Tap share. | Native share sheet, or link copied to clipboard with a toast. |
+| MAP-13 | Select property by address | Tap 🔍 "Select a property"; search an address of a suburban house. | Flies in and drops a labeled pin; defensible-space zones draw around it. |
+| MAP-14 | Select property by map tap | In the modal, "Pick on the map"; tap a rooftop. | Crosshair cursor; the tapped point is pinned and focused. |
+| MAP-15 | Zones follow footprint | Focus a property over a mapped building (zoom 17). | Zones **trace the building outline** (Zone 0/1/2 at 5/30/100 ft), not circles. Rural / no footprint falls back to circles. |
+| MAP-16 | Hybrid fire history | Toggle Fire History; view inside CA, then a non-CA state (zoom ≥ 7). | CA shows CAL FIRE perimeters; elsewhere shows NIFC national perimeters; refetches on pan/zoom. |
+| MAP-17 | Per-layer legend | Toggle layers on/off; use each key's chevron. | A key card appears **only** for visible layers; the chevron hides/unhides each key; keys sit above the scale bar. |
+| MAP-18 | Enable-location (iOS) | On iOS, tap the "Enable location" button (or Locate). | The iOS location prompt appears (it won't auto-prompt); on denial a toast explains how to enable. |
 
 ---
 
@@ -123,6 +129,8 @@ Requires HTTPS + camera permission. Best tested outdoors on a phone.
 | AR-05 | Capture without assessment | Open bare `/ar`; capture. | "Open AR from an assessment to save it" message (recorded, not attached). |
 | AR-06 | Mode switch | Switch camera-overlay / 3D / measurement modes. | Modes switch; on WebXR-capable devices, measurement may enter an XR session. |
 | AR-07 | Clear / dismiss | Dismiss individual and all detections. | Overlays clear as expected. |
+| AR-08 | Defensible-space zones (iOS / all) | Camera-overlay → "Enable AR positioning"; grant motion + location; tilt down and pan. | Colored zone outlines (red/orange/yellow = Zone 0/1/2) appear **on the ground** around you and **hold position** as you turn. Over a building they follow its footprint; in the open they're circles. |
+| AR-09 | Defensible-space zones (Android / WebXR) | On a WebXR device, enter measurement mode; grant motion + location. | The same zone outlines render on the floor plane via the XR session (more stable than the compass path). |
 
 ---
 
@@ -250,6 +258,14 @@ These are **expected** behaviors — not bugs. Don't file them.
   calibration note (BRIDGE-07), not a release blocker.
 - **WebXR geo markers are experimental:** the XR scene has no true north, so the
   alignment is approximate and drifts; non-XR overlay is the primary path.
+- **AR defensible-space zones center on where you stand:** the structure center
+  is stamped from the first GPS fix, not yet a pre-selected property; an explicit
+  "set / nudge structure" control is planned.
+- **AR zone ground height is approximate:** the ground plane is dropped a fixed
+  ~1.5 m (handheld height); zones may sit slightly high/low on a given device.
+- **iOS has no WebXR:** iPhone/iPad use the compass/GPS overlay (metres accuracy,
+  some drift). WebXR (Android) is the higher-fidelity path; both draw the same
+  shared zone geometry.
 - **Photo blobs aren't copied between devices:** metadata + Storage URL sync;
   the image bytes are served from Storage, not transferred device-to-device.
 - **Account deletion is request-based:** the in-app control sends an email

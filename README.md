@@ -158,7 +158,9 @@ Notes:
   Mapbox building footprint under the point is buffered outward 5 / 30 / 100 ft
   (`@turf/buffer`). Where no footprint exists (rural areas, low zoom, missing
   map data) the circles remain. The rings are a real 100 ft buffer, so they
-  look small until you zoom in.
+  look small until you zoom in. The zone geometry lives in
+  `src/shared/utils/defensibleZones.ts` and is **shared with the AR view** — see
+  [Augmented reality](#augmented-reality).
 - **Legend**: a per-layer key (`MapLegend`) shows one card per *visible* layer,
   bottom-left — a layer's key appears only while that layer is on. The
   Vegetation key is representative (LANDFIRE FBFM40 has 40 classes).
@@ -261,6 +263,36 @@ labeling and convert the result back for the browser:
    `INPUT_SIZE` in `yoloSegmenter.ts`, and the model is served from
    `/models/yolo11n-seg_web_model/`.
 
+## Augmented reality
+
+`src/features/augmented-reality/` renders geo-anchored content over the live
+camera using three.js. Device pose comes from `useGeoPose` (GPS + compass
+heading + pitch/roll); world points are placed via the `geoEnu` bridge
+(`geoToEnu` → `enuToThree`).
+
+**Defensible space in AR.** The AR view draws the *same* zone geometry as the
+map (`defensibleZones.ts`), so the two can't disagree. Since the map's footprint
+lookup needs a rendered map, AR gets the footprint off-map via
+`src/shared/utils/buildingFootprint.ts`, which fetches the Mapbox Streets
+**vector tile** for the point and decodes its `building` layer
+(`@mapbox/vector-tile` + `pbf`) — the Tilequery API can't do this (it returns
+only a point, not the outline). Circles are the fallback when no footprint is
+found.
+
+Two renderers draw the zones, by platform:
+
+| Path | Component | Platform | Tracking |
+| --- | --- | --- | --- |
+| Compass overlay | `GeoMarkerOverlay` | **All (incl. iOS)** | GPS + compass (metres, some drift) |
+| WebXR | `WebXRScene` | **Android Chrome only** | 6-DoF SLAM (drift-free) |
+
+WebXR `immersive-ar` is unsupported on iOS (all iOS browsers are WebKit), so
+iPhone/iPad use the compass overlay; Android additionally gets the WebXR
+version. Both project the shared zone polygons onto the ground plane. The
+zone center is currently stamped from the first GPS fix ("stand at the
+structure"); an explicit set/nudge control is planned. See
+[`docs/`](docs/) for the full design rationale.
+
 ## Auth — DEV_MODE
 
 `src/app/providers/AuthProvider.tsx` has a top-level `DEV_MODE` flag that
@@ -273,3 +305,10 @@ Configured in `vite.config.ts` via `vite-plugin-pwa` (`registerType:
 'autoUpdate'`). Runtime caches: Mapbox tiles, Supabase responses, images, and
 `.wasm`/`.tflite` model files. Because the service worker auto-updates, a new
 deploy is picked up on the next reload.
+
+## Documentation
+
+- [`docs/TEST_PLAN.md`](docs/TEST_PLAN.md) — end-user test plan covering every feature.
+- [`docs/SBOM.md`](docs/SBOM.md) — software bill of materials (dependencies, licenses, external data sources).
+- [`docs/legend/`](docs/legend/) — map legend key images used above.
+- `CLAUDE.md` — architecture guide for contributors.

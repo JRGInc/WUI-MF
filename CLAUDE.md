@@ -57,6 +57,10 @@ When adding a new persisted entity: extend the Dexie schema (bump `version()` in
 
 `src/features/computer-vision/` runs TensorFlow.js models in the browser. `inferenceService.ts` exposes preprocessing (`preprocessImage`) and per-task inference (e.g. `runVegetationSegmentation`) using `tf.tidy()` for memory management. Models are cached in Dexie's `cachedModels` table by name+version. `@tensorflow/tfjs` is included in `optimizeDeps` (prebundled in dev — excluding it serves ~1200 raw modules and breaks on CJS files) and split into its own manual chunk in production builds.
 
+### Defensible space & AR (shared geometry)
+
+Defensible-space zone geometry lives in `src/shared/utils/defensibleZones.ts` (`circleZoneFeatures`, `footprintZoneFeatures`, `DEFENSIBLE_ZONE_SPECS`) and is imported by **both** the Risk Map and the AR view, so the two always draw identical zones. `footprintZoneFeatures` buffers a building footprint (`@turf/buffer`); `circleZoneFeatures` is the point fallback. The map reads the footprint from the rendered style (`buildingFootprintAt` in `RiskMap.tsx`, via `queryRenderedFeatures`); off-map (AR) uses `src/shared/utils/buildingFootprint.ts`, which fetches the Mapbox Streets vector tile and decodes its `building` layer (`@mapbox/vector-tile` + `pbf`) — the Tilequery API returns only a point, not the outline. AR renders the zones as ground `LineLoop`s two ways: `GeoMarkerOverlay` (compass overlay, all platforms incl. iOS) and `WebXRScene` (WebXR, Android only). WebXR `immersive-ar` is unsupported on iOS.
+
 ### Build chunking
 
 `vite.config.ts` splits these into separate chunks: `tensorflow`, `mapbox`, `three`, and a `vendor` chunk for react/router/zustand. Keep heavy libraries out of shared modules that are eagerly imported.
@@ -73,6 +77,6 @@ Supabase row shapes use `snake_case` (`src/shared/types/database.ts`); domain ty
 
 ## Notes
 
-- Not currently a git repo.
+- Docs live in `docs/`: `TEST_PLAN.md` (end-user tests) and `SBOM.md` (dependencies/licenses/data sources).
 - `nul` in repo root is a stray Windows artifact (likely a `> nul` redirect on the wrong platform) — safe to ignore/delete.
 - `src/lib/` is aliased as `@lib` but does not exist yet.
