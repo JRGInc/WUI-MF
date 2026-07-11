@@ -72,7 +72,9 @@ export default function ARViewer() {
   const { annotations: geoAnnotations, addAnnotation } = useAnnotations(assessmentId);
   // Geo-pose for the XR path (experimental). Only watches in XR mode; the non-XR
   // overlay owns its own pose instance, and the two modes are mutually exclusive.
-  const xrGeoPose = useGeoPose(useXR);
+  // Active in the XR (Android) path and the camera-overlay (iOS) path, so the
+  // defensible-space center can be stamped and zones drawn on both.
+  const arGeoPose = useGeoPose(useXR || mode === 'camera-overlay');
   const [pendingArCoords, setPendingArCoords] = useState<GeoCoordinates | null>(null);
   const [arDraftTitle, setArDraftTitle] = useState('');
   const [arDraftType, setArDraftType] = useState<AnnotationType>('risk-marker');
@@ -86,10 +88,10 @@ export default function ARViewer() {
   const [arZoneCenter, setArZoneCenter] = useState<GeoCoordinates | null>(null);
   const [defensibleZones, setDefensibleZones] = useState<GeoJSON.Feature[]>([]);
   useEffect(() => {
-    if (useXR && xrGeoPose.coords && !arZoneCenter) {
-      setArZoneCenter(xrGeoPose.coords);
+    if (arGeoPose.coords && !arZoneCenter) {
+      setArZoneCenter(arGeoPose.coords);
     }
-  }, [useXR, xrGeoPose.coords, arZoneCenter]);
+  }, [arGeoPose.coords, arZoneCenter]);
   useEffect(() => {
     if (!arZoneCenter) {
       setDefensibleZones([]);
@@ -228,7 +230,7 @@ export default function ARViewer() {
           onRisks={setXrRisks}
           onScanState={setXrScanState}
           geoAnnotations={geoAnnotations}
-          geoPose={xrGeoPose}
+          geoPose={arGeoPose}
           defensibleZones={defensibleZones}
         />
       ) : (
@@ -246,6 +248,7 @@ export default function ARViewer() {
           annotations={geoAnnotations}
           active={isStreaming}
           onPlace={assessmentId ? setPendingArCoords : undefined}
+          defensibleZones={defensibleZones}
         />
       )}
 

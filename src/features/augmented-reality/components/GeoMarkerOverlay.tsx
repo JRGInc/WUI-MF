@@ -4,8 +4,21 @@ import { MapPinIcon } from '@heroicons/react/24/outline';
 import { useGeoPose } from '../hooks/useGeoPose';
 import { geoToEnu, enuToGeo, enuToThree, distanceMeters } from '../utils/geoEnu';
 import { makeMarkerSprite, disposeMarkerSprite } from '../utils/markerSprite';
+import { zoneOuterRing } from '@/shared/utils/defensibleZones';
 import { RISK_CSS, annotationRisk } from '@/shared/utils/annotationStyle';
 import type { GeoCoordinates, MapAnnotation } from '@/shared/types';
+
+// Defensible-space zone outline colors (match the map + legend).
+const ZONE_COLORS: Record<number, number> = { 0: 0xef4444, 1: 0xf97316, 2: 0xeab308 };
+// Approx handheld phone height — drop the ground plane below the camera so the
+// zone outlines lie on the ground rather than at eye level.
+const ZONE_GROUND_DROP_M = 1.5;
+
+interface ZoneLine {
+  line: THREE.LineLoop;
+  ring: number[][]; // lng/lat pairs, re-projected each frame from the GPS fix
+  positions: Float32Array;
+}
 
 // How far ahead of the user a dropped marker lands, along the current heading.
 const DROP_AHEAD_M = 10;
@@ -29,6 +42,10 @@ interface GeoMarkerOverlayProps {
   // Phase 4: called with the computed coordinate when the user drops a marker
   // in AR. The parent captures details and persists it as a MapAnnotation.
   onPlace?: (coords: GeoCoordinates) => void;
+  // Defensible-space zone polygons (shared geometry). Drawn as ground outlines
+  // via the same GPS/compass projection as the markers — this is the iOS path,
+  // since WebXR is Android-only.
+  defensibleZones?: GeoJSON.Feature[];
 }
 
 interface MarkerObj {
@@ -46,13 +63,19 @@ interface MarkerObj {
  * see the design note. Pitch/roll are not yet applied, so markers ride the
  * horizon line; turning left/right tracks correctly.
  */
-export function GeoMarkerOverlay({ annotations, active, onPlace }: GeoMarkerOverlayProps) {
+export function GeoMarkerOverlay({
+  annotations,
+  active,
+  onPlace,
+  defensibleZones,
+}: GeoMarkerOverlayProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const markersRef = useRef<MarkerObj[]>([]);
+  const zoneLinesRef = useRef<ZoneLine[]>([]);
   const rafRef = useRef<number | null>(null);
 
   // Live pose kept in refs so the render loop reads the latest without re-binding.
@@ -116,6 +139,41 @@ export function GeoMarkerOverlay({ annotations, active, onPlace }: GeoMarkerOver
     }
   }, [annotations]);
 
+  // --- (re)build defensible-space zone LineLoops when the polygons change ---
+  useEffect(() => {
+    const scene = sceneRef.current;
+    if (!scene) return;
+
+    const built: ZoneLine[] = [];
+    for (const feature of defensibleZones ?? []) {
+      const ring = zoneOuterRing(feature);
+      if (!ring || ring.length < 2) continue;
+      const zone = Number(feature.properties?.zone ?? 2);
+      const positions = new Float32Array(ring.length * 3);
+      const geom = new THREE.BufferGeometry();
+      geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+      const mat = new THREE.LineBasicMaterial({
+        color: ZONE_COLORS[zone] ?? 0xeab308,
+        transparent: true,
+        opacity: 0.95,
+      });
+      const line = new THREE.LineLoop(geom, mat);
+      line.frustumCulled = false; // verts are rewritten each frame from GPS
+      scene.add(line);
+      built.push({ line, ring, positions });
+    }
+    zoneLinesRef.current = built;
+
+    return () => {
+      for (const { line } of built) {
+        scene.remove(line);
+        line.geometry.dispose();
+        (line.material as THREE.Material).dispose();
+      }
+      zoneLinesRef.current = [];
+    };
+  }, [defensibleZones]);
+
   // --- render loop ---
   useEffect(() => {
     if (!enabled || !active) return;
@@ -144,6 +202,20 @@ export function GeoMarkerOverlay({ annotations, active, onPlace }: GeoMarkerOver
             const k = Math.min(MAX_DIST, Math.max(MIN_DIST, dist)) / dist;
             const p = enuToThree({ east: enu.east * k, north: enu.north * k, up: 0 }, 0);
             sprite.position.set(p.x, p.y, p.z);
+          }
+
+          // Defensible-space zones: project each ring vertex at true ENU (no
+          // depth clamp — they're real ground geometry) onto the dropped ground
+          // plane. The camera is rotated by the pose, so no per-vertex heading.
+          for (const { line: zline, ring, positions } of zoneLinesRef.current) {
+            for (let i = 0; i < ring.length; i++) {
+              const enu = geoToEnu(coords, { latitude: ring[i][1], longitude: ring[i][0] });
+              const p = enuToThree({ east: enu.east, north: enu.north, up: -ZONE_GROUND_DROP_M }, 0);
+              positions[i * 3] = p.x;
+              positions[i * 3 + 1] = p.y;
+              positions[i * 3 + 2] = p.z;
+            }
+            (zline.geometry.getAttribute('position') as THREE.BufferAttribute).needsUpdate = true;
           }
         }
         renderer.render(scene, camera);
