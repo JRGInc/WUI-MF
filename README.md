@@ -167,6 +167,18 @@ Notes:
   ignored there. Tap the **Locate** button or the **Enable location** banner
   (mirrors the AR view's "Enable AR positioning" tap) to trigger the prompt.
 
+### Legend keys
+
+A per-layer key shows in the bottom-left, one card per *visible* layer (colors
+mirror each layer's rendering):
+
+<p>
+  <img src="docs/legend/defensible-space.svg" alt="Defensible Space key: Zone 0 (0–5 ft), Zone 1 (5–30 ft), Zone 2 (30–100 ft)" height="124">
+  <img src="docs/legend/fire-history.svg" alt="Fire History key: burn-year color ramp 1990–2024" height="94">
+  <img src="docs/legend/vegetation.svg" alt="Vegetation/Fuel key: Grass, Shrub, Timber, Non-burnable (representative)" height="160">
+  <img src="docs/legend/slope.svg" alt="Slope Analysis key: flat to steep gradient" height="80">
+</p>
+
 ### Selecting a property
 
 The **Select a property** button (🔍 in the map control stack) opens a modal
