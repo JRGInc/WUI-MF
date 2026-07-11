@@ -152,6 +152,19 @@ Notes:
   toggling it always shows something. The rings are a real 100 ft buffer, so
   they appear small until you zoom in (a property tap flies to zoom 17).
 
+### Selecting a property
+
+The **Select a property** button (🔍 in the map control stack) opens a modal
+with two ways to choose a location:
+
+- **Search by address** — geocoded with the **Mapbox Geocoding API**
+  (`geocoding/v5`), biased to the US and to the current map center (`proximity`).
+- **Pick on the map** — tap to drop the point (crosshair cursor + cancel hint).
+
+The chosen point is pinned (labeled with the resolved address) and focused —
+the map flies to zoom 17 and draws its defensible-space zones — with a **Clear**
+option. Geocoding reuses the existing `VITE_MAPBOX_TOKEN`; no extra config.
+
 ## Computer vision
 
 On-device inference runs in the browser with **TensorFlow.js** on its default
