@@ -6,6 +6,7 @@ import {
   MapPinIcon,
   CameraIcon,
   ShareIcon,
+  MagnifyingGlassIcon,
 } from '@heroicons/react/24/outline';
 
 interface MapControlsProps {
@@ -13,6 +14,7 @@ interface MapControlsProps {
   onZoomOut: () => void;
   onResetView: () => void;
   onLocate: () => void;
+  onSelectProperty?: () => void;
   onScreenshot?: () => void;
   onShare?: () => void;
 }
@@ -22,11 +24,25 @@ export function MapControls({
   onZoomOut,
   onResetView,
   onLocate,
+  onSelectProperty,
   onScreenshot,
   onShare,
 }: MapControlsProps) {
   return (
     <div className="flex flex-col gap-2">
+      {/* Select a property (by address or by tapping the map) */}
+      {onSelectProperty && (
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg overflow-hidden">
+          <button
+            onClick={onSelectProperty}
+            className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+            title="Select a property"
+          >
+            <MagnifyingGlassIcon className="w-5 h-5 text-gray-600 dark:text-gray-400" />
+          </button>
+        </div>
+      )}
+
       {/* Zoom controls */}
       <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg overflow-hidden">
         <button

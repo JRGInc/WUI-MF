@@ -100,6 +100,18 @@ export default function RiskMap({
   const [draftType, setDraftType] = useState<AnnotationType>('risk-marker');
   const [draftRisk, setDraftRisk] = useState<RiskLevel>('high');
 
+  // Property selection: pick a location by address (Mapbox geocoding) or by
+  // tapping the map. The chosen point is focused (defensible-space zones drawn)
+  // and pinned so the user can see what they selected.
+  const [selectedLocation, setSelectedLocation] = useState<{
+    coords: GeoCoordinates;
+    label?: string;
+  } | null>(null);
+  const [showSelectModal, setShowSelectModal] = useState(false);
+  const [isPickingProperty, setIsPickingProperty] = useState(false);
+  const [addressQuery, setAddressQuery] = useState('');
+  const [isSearching, setIsSearching] = useState(false);
+
   // Last center we drew defensible-space zones around, so they can be redrawn
   // after a style switch.
   const zoneCenterRef = useRef<GeoCoordinates | null>(null);
@@ -354,6 +366,80 @@ export default function RiskMap({
     },
     [flyTo, addDefensibleSpaceZones]
   );
+
+  // Select a property location: pin it, focus it (fly + draw defensible zones).
+  const selectProperty = useCallback(
+    (coords: GeoCoordinates, label?: string) => {
+      setSelectedLocation({ coords, label });
+      focusProperty(coords);
+    },
+    [focusProperty]
+  );
+
+  // Geocode the typed address via Mapbox and select the best match.
+  const searchAddress = useCallback(async () => {
+    const query = addressQuery.trim();
+    if (!query) return;
+    setIsSearching(true);
+    try {
+      const center = map.current?.getCenter();
+      const proximity = center ? `&proximity=${center.lng},${center.lat}` : '';
+      const url =
+        `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json` +
+        `?access_token=${MAPBOX_TOKEN}&limit=1&country=us${proximity}`;
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`Geocoding failed: ${res.status}`);
+      const data = (await res.json()) as {
+        features?: Array<{ center: [number, number]; place_name: string }>;
+      };
+      const feature = data.features?.[0];
+      if (!feature) {
+        showErrorToast('Address not found', `No match for "${query}".`);
+        return;
+      }
+      const [longitude, latitude] = feature.center;
+      selectProperty({ latitude, longitude }, feature.place_name);
+      setAddressQuery(feature.place_name);
+      setShowSelectModal(false);
+      showSuccessToast('Property selected', feature.place_name);
+    } catch (error) {
+      console.error('Address search failed:', error);
+      showErrorToast('Search failed', 'Could not look up that address.');
+    } finally {
+      setIsSearching(false);
+    }
+  }, [addressQuery, selectProperty]);
+
+  // "Pick on map" mode: the next map tap sets the property location.
+  const startPickingProperty = useCallback(() => {
+    setShowSelectModal(false);
+    setIsPlacing(false); // don't run alongside annotation placement
+    setIsPickingProperty(true);
+  }, []);
+
+  const clearSelectedProperty = useCallback(() => {
+    setSelectedLocation(null);
+    setAddressQuery('');
+  }, []);
+
+  // While picking, the next map click captures the property location.
+  useEffect(() => {
+    const m = map.current;
+    if (!m || !mapLoaded || !isPickingProperty) return;
+
+    const handler = (e: mapboxgl.MapMouseEvent) => {
+      selectProperty({ latitude: e.lngLat.lat, longitude: e.lngLat.lng });
+      setIsPickingProperty(false);
+    };
+    m.on('click', handler);
+    m.getCanvas().style.cursor = 'crosshair';
+
+    return () => {
+      m.off('click', handler);
+      const canvas = m.getCanvas();
+      if (canvas) canvas.style.cursor = '';
+    };
+  }, [isPickingProperty, mapLoaded, selectProperty]);
 
   // Center on the user's position once, on the first GPS fix — unless the map
   // was opened with an explicit target (props, URL coords, or assessment link).
@@ -620,6 +706,16 @@ export default function RiskMap({
       {markerElements}
       {annotationElements}
 
+      {/* Selected-property pin (address search / map pick) */}
+      {mapLoaded && selectedLocation && (
+        <PropertyMarker
+          map={map.current}
+          coordinates={selectedLocation.coords}
+          label={selectedLocation.label || 'Selected property'}
+          onClick={() => focusProperty(selectedLocation.coords)}
+        />
+      )}
+
       {/* "You are here" indicator + GPS accuracy halo */}
       {mapLoaded && userLocation.coords && (
         <>
@@ -711,6 +807,7 @@ export default function RiskMap({
             onZoomOut={() => map.current?.zoomOut()}
             onResetView={handleResetView}
             onLocate={getCurrentLocation}
+            onSelectProperty={() => setShowSelectModal(true)}
             onScreenshot={handleScreenshot}
             onShare={handleShare}
           />
@@ -857,6 +954,80 @@ export default function RiskMap({
             >
               <TrashIcon className="w-4 h-4" /> Remove marker
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Pick-on-map hint while selecting a property location */}
+      {showControls && isPickingProperty && (
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20">
+          <button
+            onClick={() => setIsPickingProperty(false)}
+            className="flex items-center gap-2 px-3 py-2 rounded-lg shadow-lg bg-fire-600 text-white text-sm font-medium"
+          >
+            <XMarkIcon className="w-4 h-4" /> Tap the map to set the property — cancel
+          </button>
+        </div>
+      )}
+
+      {/* Select-property modal: search by address or pick on the map */}
+      {showControls && showSelectModal && (
+        <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/40 p-4">
+          <div className="card p-6 w-full max-w-sm space-y-4">
+            <div className="flex items-start justify-between gap-2">
+              <h3 className="text-lg font-medium text-gray-900 dark:text-white">
+                Select a property
+              </h3>
+              <button
+                onClick={() => setShowSelectModal(false)}
+                className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+              >
+                <XMarkIcon className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                void searchAddress();
+              }}
+            >
+              <label className="label">Address</label>
+              <div className="flex gap-2">
+                <input
+                  autoFocus
+                  value={addressQuery}
+                  onChange={(e) => setAddressQuery(e.target.value)}
+                  className="input flex-1"
+                  placeholder="e.g. 1600 Amphitheatre Pkwy"
+                />
+                <button type="submit" className="btn-primary" disabled={isSearching}>
+                  {isSearching ? '…' : 'Search'}
+                </button>
+              </div>
+            </form>
+
+            <div className="flex items-center gap-3">
+              <div className="h-px flex-1 bg-gray-200 dark:bg-gray-700" />
+              <span className="text-xs text-gray-400">or</span>
+              <div className="h-px flex-1 bg-gray-200 dark:bg-gray-700" />
+            </div>
+
+            <button onClick={startPickingProperty} className="btn-outline w-full flex items-center justify-center gap-2">
+              <MapPinIcon className="w-4 h-4" /> Pick location on the map
+            </button>
+
+            {selectedLocation && (
+              <button
+                onClick={() => {
+                  clearSelectedProperty();
+                  setShowSelectModal(false);
+                }}
+                className="flex items-center gap-2 text-sm text-red-600 hover:text-red-700"
+              >
+                <TrashIcon className="w-4 h-4" /> Clear selected property
+              </button>
+            )}
           </div>
         </div>
       )}
