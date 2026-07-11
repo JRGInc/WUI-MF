@@ -1,3 +1,5 @@
+import { useState } from 'react';
+import { ChevronDownIcon, ChevronUpIcon } from '@heroicons/react/24/outline';
 import type { MapLayer } from '@/shared/types';
 
 // Fire-history year ramp — matches the fill-color interpolate in
@@ -95,24 +97,54 @@ function LayerKey({ layer }: { layer: MapLayer }) {
 }
 
 // A stacked key that shows one card per *visible* layer — the key for a layer
-// appears only while that layer is turned on.
+// appears only while that layer is turned on. Each card's body can be
+// hidden/unhidden independently via its header (the title stays as the handle).
 export function MapLegend({ layers }: { layers: MapLayer[] }) {
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const visible = layers.filter((l) => l.visible);
   if (visible.length === 0) return null;
 
+  const toggle = (id: string) =>
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
   return (
     <div className="absolute bottom-4 left-4 z-10 flex flex-col gap-2 max-h-[70%] overflow-y-auto">
-      {visible.map((layer) => (
-        <div
-          key={layer.id}
-          className="bg-white/95 dark:bg-gray-800/95 backdrop-blur rounded-lg shadow-lg p-3"
-        >
-          <h3 className="text-xs font-medium text-gray-900 dark:text-white mb-2">
-            {layer.name}
-          </h3>
-          <LayerKey layer={layer} />
-        </div>
-      ))}
+      {visible.map((layer) => {
+        const isCollapsed = collapsed.has(layer.id);
+        return (
+          <div
+            key={layer.id}
+            className="bg-white/95 dark:bg-gray-800/95 backdrop-blur rounded-lg shadow-lg p-3"
+          >
+            <button
+              type="button"
+              onClick={() => toggle(layer.id)}
+              aria-expanded={!isCollapsed}
+              title={isCollapsed ? 'Show key' : 'Hide key'}
+              className="w-full flex items-center justify-between gap-2 text-left"
+            >
+              <h3 className="text-xs font-medium text-gray-900 dark:text-white">
+                {layer.name}
+              </h3>
+              {isCollapsed ? (
+                <ChevronDownIcon className="w-4 h-4 text-gray-400 shrink-0" />
+              ) : (
+                <ChevronUpIcon className="w-4 h-4 text-gray-400 shrink-0" />
+              )}
+            </button>
+            {!isCollapsed && (
+              <div className="mt-2">
+                <LayerKey layer={layer} />
+              </div>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
