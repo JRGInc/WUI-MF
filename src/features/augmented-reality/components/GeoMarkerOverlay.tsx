@@ -342,13 +342,16 @@ export function GeoMarkerOverlay({
       .sort((x, y) => x.dist - y.dist);
   }, [annotations, pose.coords]);
 
-  if (!active) return null;
-
+  // NOTE: always render the container + canvas (even when inactive) so the
+  // three.js scene sets up on mount. Returning null while the camera warms up
+  // left the scene uninitialized (the setup effect ran with no canvas and never
+  // re-ran), so markers/zones never built. HUD elements are gated on `active`.
   return (
     <div ref={containerRef} className="absolute inset-0 z-[6] pointer-events-none">
       <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" />
 
-      {/* Enable / status chip */}
+      {/* Enable / status chip (only once the camera is streaming) */}
+      {active && (
       <div className="absolute top-16 left-1/2 -translate-x-1/2 pointer-events-auto">
         {!enabled ? (
           <button
@@ -380,6 +383,7 @@ export function GeoMarkerOverlay({
           </div>
         )}
       </div>
+      )}
 
       {/* Top-down zone radar — always-visible view of the zones around you,
           independent of AR pitch/tracking (the reliable path on iOS). */}
