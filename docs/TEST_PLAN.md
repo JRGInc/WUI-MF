@@ -129,8 +129,11 @@ Requires HTTPS + camera permission. Best tested outdoors on a phone.
 | AR-05 | Capture without assessment | Open bare `/ar`; capture. | "Open AR from an assessment to save it" message (recorded, not attached). |
 | AR-06 | Mode switch | Switch camera-overlay / 3D / measurement modes. | Modes switch; on WebXR-capable devices, measurement may enter an XR session. |
 | AR-07 | Clear / dismiss | Dismiss individual and all detections. | Overlays clear as expected. |
-| AR-08 | Defensible-space zones (iOS / all) | Camera-overlay → "Enable AR positioning"; grant motion + location; tilt down and pan. | Colored zone outlines (red/orange/yellow = Zone 0/1/2) appear **on the ground** around you and **hold position** as you turn. Over a building they follow its footprint; in the open they're circles. |
-| AR-09 | Defensible-space zones (Android / WebXR) | On a WebXR device, enter measurement mode; grant motion + location. | The same zone outlines render on the floor plane via the XR session (more stable than the compass path). |
+| AR-08 | Defensible-space zones (iOS / all) | Camera-overlay or 3D-model mode → "Enable AR positioning"; grant motion + location; tilt down and pan. | Filled translucent **bands** (red/orange/yellow = Zone 0/1/2) appear **on the ground** around you and **hold position** as you turn. Over a building they follow its footprint; in the open they're circles. |
+| AR-09 | Zone radar HUD | With positioning enabled. | A top-right **top-down radar** shows the zones around you (you at center), **rotating heading-up** as you turn — visible even without tilting down. |
+| AR-10 | Show/hide defensible space | Tap the **"Defensible space"** eye toggle (left, below the mode selector). | Hides/shows the ground bands **and** the radar together; toggles back on. |
+| AR-11 | Footprint vs circle | Stand on/near a mapped building, then in an open area. | On a building the zones trace its footprint (fetched from the Mapbox vector tile); with no footprint they fall back to circles. |
+| AR-12 | Defensible-space zones (Android / WebXR) | On a WebXR device, enter measurement mode; grant motion + location. | The same zones render on the floor plane via the XR session (drift-free vs the compass path). ⚠️ Device-only — not verifiable on iOS or desktop. |
 
 ---
 
@@ -262,10 +265,12 @@ These are **expected** behaviors — not bugs. Don't file them.
   is stamped from the first GPS fix, not yet a pre-selected property; an explicit
   "set / nudge structure" control is planned.
 - **AR zone ground height is approximate:** the ground plane is dropped a fixed
-  ~1.5 m (handheld height); zones may sit slightly high/low on a given device.
+  ~1.5 m (handheld height); the on-ground bands may sit slightly high/low on a
+  given device. The **radar HUD** is the pitch-independent, reliable view.
 - **iOS has no WebXR:** iPhone/iPad use the compass/GPS overlay (metres accuracy,
   some drift). WebXR (Android) is the higher-fidelity path; both draw the same
-  shared zone geometry.
+  shared zone geometry. The Android/WebXR path (AR-12) is device-only and not
+  verified on iOS/desktop.
 - **Photo blobs aren't copied between devices:** metadata + Storage URL sync;
   the image bytes are served from Storage, not transferred device-to-device.
 - **Account deletion is request-based:** the in-app control sends an email
