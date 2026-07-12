@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
-import { MapPinIcon } from '@heroicons/react/24/outline';
+import { MapPinIcon, EyeIcon, EyeSlashIcon } from '@heroicons/react/24/outline';
 import { useGeoPose } from '../hooks/useGeoPose';
 import { geoToEnu, enuToGeo, enuToThree, distanceMeters } from '../utils/geoEnu';
 import { makeMarkerSprite, disposeMarkerSprite } from '../utils/markerSprite';
@@ -175,6 +175,12 @@ export function GeoMarkerOverlay({
   poseRef.current = pose;
 
   const [enabled, setEnabled] = useState(false);
+  const [showZones, setShowZones] = useState(true);
+
+  // Toggle the on-ground filled zones with the show/hide control.
+  useEffect(() => {
+    if (zonesGroupRef.current) zonesGroupRef.current.visible = showZones;
+  }, [showZones]);
 
   // --- scene setup (once) ---
   useEffect(() => {
@@ -427,9 +433,20 @@ export function GeoMarkerOverlay({
       </div>
       )}
 
+      {/* Show/hide defensible space (ground fills + radar) */}
+      {active && enabled && (
+        <button
+          onClick={() => setShowZones((v) => !v)}
+          className="absolute top-4 left-4 pointer-events-auto flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-black/55 backdrop-blur text-white text-xs font-medium shadow-lg"
+        >
+          {showZones ? <EyeIcon className="w-4 h-4" /> : <EyeSlashIcon className="w-4 h-4" />}
+          Defensible space
+        </button>
+      )}
+
       {/* Top-down zone radar — always-visible view of the zones around you,
           independent of AR pitch/tracking (the reliable path on iOS). */}
-      {enabled && (
+      {enabled && showZones && (
         <canvas
           ref={radarRef}
           width={180}
