@@ -249,6 +249,7 @@ export default function ARViewer() {
           active={isStreaming}
           onPlace={assessmentId ? setPendingArCoords : undefined}
           defensibleZones={defensibleZones}
+          pose={arGeoPose}
         />
       )}
 

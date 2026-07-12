@@ -46,6 +46,10 @@ interface GeoMarkerOverlayProps {
   // via the same GPS/compass projection as the markers — this is the iOS path,
   // since WebXR is Android-only.
   defensibleZones?: GeoJSON.Feature[];
+  // Single source of pose for the whole AR view, owned by ARViewer. Passing it
+  // in (rather than each overlay creating its own useGeoPose) keeps the zone
+  // geometry's center and the renderer on the *same* GPS fix.
+  pose: ReturnType<typeof useGeoPose>;
 }
 
 interface MarkerObj {
@@ -68,6 +72,7 @@ export function GeoMarkerOverlay({
   active,
   onPlace,
   defensibleZones,
+  pose,
 }: GeoMarkerOverlayProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -78,8 +83,8 @@ export function GeoMarkerOverlay({
   const zoneLinesRef = useRef<ZoneLine[]>([]);
   const rafRef = useRef<number | null>(null);
 
-  // Live pose kept in refs so the render loop reads the latest without re-binding.
-  const pose = useGeoPose(active);
+  // Live pose kept in a ref so the render loop reads the latest without
+  // re-binding. Pose is owned by ARViewer and passed in (single watcher).
   const poseRef = useRef(pose);
   poseRef.current = pose;
 
@@ -282,6 +287,9 @@ export function GeoMarkerOverlay({
               'Acquiring GPS…'
             )}
             {pose.heading !== null ? ` · ${Math.round(pose.heading)}°` : ' · no compass'}
+            {defensibleZones && defensibleZones.length > 0
+              ? ` · ${defensibleZones.length} zones`
+              : ''}
           </div>
         )}
       </div>
