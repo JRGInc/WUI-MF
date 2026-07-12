@@ -72,9 +72,12 @@ export default function ARViewer() {
   const { annotations: geoAnnotations, addAnnotation } = useAnnotations(assessmentId);
   // Geo-pose for the XR path (experimental). Only watches in XR mode; the non-XR
   // overlay owns its own pose instance, and the two modes are mutually exclusive.
-  // Active in the XR (Android) path and the camera-overlay (iOS) path, so the
-  // defensible-space center can be stamped and zones drawn on both.
-  const arGeoPose = useGeoPose(useXR || mode === 'camera-overlay');
+  // Active in the XR (Android) path and the camera-based modes (camera-overlay
+  // live scan + the 3D-model defensible-space view), so the zone center can be
+  // stamped and zones drawn on all of them.
+  const arGeoPose = useGeoPose(
+    useXR || mode === 'camera-overlay' || mode === '3d-model'
+  );
   const [pendingArCoords, setPendingArCoords] = useState<GeoCoordinates | null>(null);
   const [arDraftTitle, setArDraftTitle] = useState('');
   const [arDraftType, setArDraftType] = useState<AnnotationType>('risk-marker');
@@ -242,8 +245,10 @@ export default function ARViewer() {
         />
       )}
 
-      {/* Geo-anchored map markers over the camera (non-XR path) */}
-      {!useXR && mode === 'camera-overlay' && (
+      {/* Geo-anchored markers + defensible-space zones over the camera (non-XR
+          path). Shown in live-scan AND the "3D model" mode — the latter is the
+          defensible-space zone view (per its info panel). */}
+      {!useXR && (mode === 'camera-overlay' || mode === '3d-model') && (
         <GeoMarkerOverlay
           annotations={geoAnnotations}
           active={isStreaming}
