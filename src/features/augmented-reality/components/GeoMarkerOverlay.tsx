@@ -22,11 +22,20 @@ const ZONE_RADAR: Record<number, { fill: string; stroke: string }> = {
 };
 const RADAR_RANGE_M = 34;
 
-interface ZoneLine {
-  line: THREE.LineLoop;
-  ring: number[][]; // lng/lat pairs, re-projected each frame from the GPS fix
-  positions: Float32Array;
-  zone: number;
+// On-ground filled-band opacity per zone (rendered largest-first, so the inner,
+// brighter zones read on top — same idea as the map's stacked fills).
+const ZONE_FILL_OPACITY: Record<number, number> = { 0: 0.35, 1: 0.28, 2: 0.2 };
+
+// Rough geographic centroid of a lng/lat ring — the local origin the filled
+// zone meshes are built around (so we triangulate once, then move the group).
+function ringCentroidGeo(ring: number[][]): GeoCoordinates {
+  let sx = 0;
+  let sy = 0;
+  for (const [lng, lat] of ring) {
+    sx += lng;
+    sy += lat;
+  }
+  return { longitude: sx / ring.length, latitude: sy / ring.length };
 }
 
 // Draw a heading-up top-down radar of the zones around the user — always
@@ -149,7 +158,11 @@ export function GeoMarkerOverlay({
   const sceneRef = useRef<THREE.Scene | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const markersRef = useRef<MarkerObj[]>([]);
-  const zoneLinesRef = useRef<ZoneLine[]>([]);
+  // Filled defensible-space zones: meshes built once relative to a local origin;
+  // the group is repositioned each frame from the GPS fix.
+  const zonesGroupRef = useRef<THREE.Group | null>(null);
+  const zoneMeshesRef = useRef<THREE.Mesh[]>([]);
+  const zoneOriginRef = useRef<GeoCoordinates | null>(null);
   const radarRef = useRef<HTMLCanvasElement>(null);
   const rafRef = useRef<number | null>(null);
   // Latest zone polygons for the radar loop (which is set up once).
@@ -185,16 +198,27 @@ export function GeoMarkerOverlay({
     resize();
     window.addEventListener('resize', resize);
 
+    const zonesGroup = new THREE.Group();
+    scene.add(zonesGroup);
+
     rendererRef.current = renderer;
     sceneRef.current = scene;
     cameraRef.current = camera;
+    zonesGroupRef.current = zonesGroup;
 
     return () => {
       window.removeEventListener('resize', resize);
+      for (const m of zoneMeshesRef.current) {
+        zonesGroup.remove(m);
+        m.geometry.dispose();
+        (m.material as THREE.Material).dispose();
+      }
+      zoneMeshesRef.current = [];
       renderer.dispose();
       rendererRef.current = null;
       sceneRef.current = null;
       cameraRef.current = null;
+      zonesGroupRef.current = null;
     };
   }, []);
 
@@ -217,39 +241,60 @@ export function GeoMarkerOverlay({
     }
   }, [annotations]);
 
-  // --- (re)build defensible-space zone LineLoops when the polygons change ---
+  // --- (re)build filled defensible-space zone meshes when the polygons change.
+  // Triangulate each zone once, relative to a shared local origin (its centroid);
+  // the render loop then just repositions the group from the live GPS fix. ---
   useEffect(() => {
-    const scene = sceneRef.current;
-    if (!scene) return;
+    const group = zonesGroupRef.current;
+    if (!group) return;
 
-    const built: ZoneLine[] = [];
-    for (const feature of defensibleZones ?? []) {
+    const dispose = () => {
+      for (const m of zoneMeshesRef.current) {
+        group.remove(m);
+        m.geometry.dispose();
+        (m.material as THREE.Material).dispose();
+      }
+      zoneMeshesRef.current = [];
+    };
+    dispose();
+
+    const zones = defensibleZones ?? [];
+    const originRing = zones.length ? zoneOuterRing(zones[0]) : null;
+    if (!originRing || originRing.length < 2) {
+      zoneOriginRef.current = null;
+      return dispose;
+    }
+    const origin = ringCentroidGeo(originRing);
+    zoneOriginRef.current = origin;
+
+    for (const feature of zones) {
       const ring = zoneOuterRing(feature);
       if (!ring || ring.length < 2) continue;
       const zone = Number(feature.properties?.zone ?? 2);
-      const positions = new Float32Array(ring.length * 3);
-      const geom = new THREE.BufferGeometry();
-      geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-      const mat = new THREE.LineBasicMaterial({
+      const shape = new THREE.Shape();
+      for (let i = 0; i < ring.length; i++) {
+        const enu = geoToEnu(origin, { latitude: ring[i][1], longitude: ring[i][0] });
+        if (i === 0) shape.moveTo(enu.east, enu.north);
+        else shape.lineTo(enu.east, enu.north);
+      }
+      const geom = new THREE.ShapeGeometry(shape);
+      geom.rotateX(-Math.PI / 2); // lay the shape flat on the ground plane
+      const mat = new THREE.MeshBasicMaterial({
         color: ZONE_COLORS[zone] ?? 0xeab308,
         transparent: true,
-        opacity: 0.95,
+        opacity: ZONE_FILL_OPACITY[zone] ?? 0.2,
+        side: THREE.DoubleSide,
+        depthTest: false, // coplanar fills — order by renderOrder, no z-fighting
+        depthWrite: false,
       });
-      const line = new THREE.LineLoop(geom, mat);
-      line.frustumCulled = false; // verts are rewritten each frame from GPS
-      scene.add(line);
-      built.push({ line, ring, positions, zone });
+      const mesh = new THREE.Mesh(geom, mat);
+      mesh.renderOrder = 2 - zone; // draw Zone 2 first, Zone 0 on top
+      mesh.frustumCulled = false;
+      group.add(mesh);
+      zoneMeshesRef.current.push(mesh);
     }
-    zoneLinesRef.current = built;
 
-    return () => {
-      for (const { line } of built) {
-        scene.remove(line);
-        line.geometry.dispose();
-        (line.material as THREE.Material).dispose();
-      }
-      zoneLinesRef.current = [];
-    };
+    return dispose;
   }, [defensibleZones]);
 
   // --- render loop ---
@@ -282,18 +327,15 @@ export function GeoMarkerOverlay({
             sprite.position.set(p.x, p.y, p.z);
           }
 
-          // Defensible-space zones: project each ring vertex at true ENU (no
-          // depth clamp — they're real ground geometry) onto the dropped ground
-          // plane. The camera is rotated by the pose, so no per-vertex heading.
-          for (const { line: zline, ring, positions } of zoneLinesRef.current) {
-            for (let i = 0; i < ring.length; i++) {
-              const enu = geoToEnu(coords, { latitude: ring[i][1], longitude: ring[i][0] });
-              const p = enuToThree({ east: enu.east, north: enu.north, up: -ZONE_GROUND_DROP_M }, 0);
-              positions[i * 3] = p.x;
-              positions[i * 3 + 1] = p.y;
-              positions[i * 3 + 2] = p.z;
-            }
-            (zline.geometry.getAttribute('position') as THREE.BufferAttribute).needsUpdate = true;
+          // Defensible-space zones: reposition the filled group so its local
+          // origin sits at the origin's real-world offset from the user, on the
+          // dropped ground plane. The camera is rotated by the pose.
+          const zGroup = zonesGroupRef.current;
+          const origin = zoneOriginRef.current;
+          if (zGroup && origin) {
+            const enu = geoToEnu(coords, origin);
+            const p = enuToThree({ east: enu.east, north: enu.north, up: -ZONE_GROUND_DROP_M }, 0);
+            zGroup.position.set(p.x, p.y, p.z);
           }
         }
         renderer.render(scene, camera);
