@@ -433,11 +433,12 @@ export function GeoMarkerOverlay({
       </div>
       )}
 
-      {/* Show/hide defensible space (ground fills + radar) */}
+      {/* Show/hide defensible space (ground fills + radar). Sits below the AR
+          mode selector (top-4 left) so it isn't covered by it. */}
       {active && enabled && (
         <button
           onClick={() => setShowZones((v) => !v)}
-          className="absolute top-4 left-4 pointer-events-auto flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-black/55 backdrop-blur text-white text-xs font-medium shadow-lg"
+          className="absolute top-20 left-4 z-10 pointer-events-auto flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-black/55 backdrop-blur text-white text-xs font-medium shadow-lg"
         >
           {showZones ? <EyeIcon className="w-4 h-4" /> : <EyeSlashIcon className="w-4 h-4" />}
           Defensible space
