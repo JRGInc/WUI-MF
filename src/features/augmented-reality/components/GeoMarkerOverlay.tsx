@@ -30,11 +30,13 @@ interface ZoneLine {
 }
 
 // Draw a heading-up top-down radar of the zones around the user — always
-// visible regardless of AR pitch/tracking (the reliable iOS view).
+// visible regardless of AR pitch/tracking (the reliable iOS view). Reads the
+// zone polygons straight from the prop, so it can't fall out of sync with the
+// WebGL rebuild.
 function drawZoneRadar(
   canvas: HTMLCanvasElement | null,
   pose: { coords: GeoCoordinates | null; heading: number | null },
-  zones: ZoneLine[]
+  zones: GeoJSON.Feature[] | undefined
 ) {
   if (!canvas) return;
   const ctx = canvas.getContext('2d');
@@ -46,14 +48,16 @@ function drawZoneRadar(
   ctx.beginPath();
   ctx.arc(c, c, c, 0, Math.PI * 2);
   ctx.fill();
-  if (!pose.coords) return;
+  if (!pose.coords || !zones) return;
 
   const h = ((pose.heading ?? 0) * Math.PI) / 180;
   const cos = Math.cos(h);
   const sin = Math.sin(h);
   const scale = (c - 4) / RADAR_RANGE_M;
-  for (const { ring, zone } of zones) {
-    if (ring.length < 2) continue;
+  for (const feature of zones) {
+    const ring = zoneOuterRing(feature);
+    if (!ring || ring.length < 2) continue;
+    const zone = Number(feature.properties?.zone ?? 2);
     ctx.beginPath();
     for (let i = 0; i < ring.length; i++) {
       const enu = geoToEnu(pose.coords, { latitude: ring[i][1], longitude: ring[i][0] });
@@ -148,6 +152,9 @@ export function GeoMarkerOverlay({
   const zoneLinesRef = useRef<ZoneLine[]>([]);
   const radarRef = useRef<HTMLCanvasElement>(null);
   const rafRef = useRef<number | null>(null);
+  // Latest zone polygons for the radar loop (which is set up once).
+  const zonesPropRef = useRef(defensibleZones);
+  zonesPropRef.current = defensibleZones;
 
   // Live pose kept in a ref so the render loop reads the latest without
   // re-binding. Pose is owned by ARViewer and passed in (single watcher).
@@ -291,8 +298,6 @@ export function GeoMarkerOverlay({
         }
         renderer.render(scene, camera);
       }
-      // Always-visible top-down radar (independent of AR pitch/tracking).
-      drawZoneRadar(radarRef.current, poseRef.current, zoneLinesRef.current);
       rafRef.current = requestAnimationFrame(loop);
     };
     rafRef.current = requestAnimationFrame(loop);
@@ -302,6 +307,19 @@ export function GeoMarkerOverlay({
       rafRef.current = null;
     };
   }, [enabled, active]);
+
+  // Radar draw loop — gated only by `enabled`, independent of the WebGL/camera
+  // path, so the top-down zone view is reliable even where AR tracking isn't.
+  useEffect(() => {
+    if (!enabled) return;
+    let raf = 0;
+    const draw = () => {
+      drawZoneRadar(radarRef.current, poseRef.current, zonesPropRef.current);
+      raf = requestAnimationFrame(draw);
+    };
+    raf = requestAnimationFrame(draw);
+    return () => cancelAnimationFrame(raf);
+  }, [enabled]);
 
   // Drop a marker ahead of the user along the current heading (Phase 4). With no
   // compass we fall back to the user's exact GPS position.
