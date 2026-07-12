@@ -253,7 +253,8 @@ export default function ARViewer() {
           annotations={geoAnnotations}
           active={isStreaming}
           onPlace={assessmentId ? setPendingArCoords : undefined}
-          defensibleZones={defensibleZones}
+          // Defensible-space zones only in the 3D-model view, not live scan.
+          defensibleZones={mode === '3d-model' ? defensibleZones : undefined}
           pose={arGeoPose}
         />
       )}
