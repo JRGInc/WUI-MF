@@ -14,10 +14,75 @@ const ZONE_COLORS: Record<number, number> = { 0: 0xef4444, 1: 0xf97316, 2: 0xeab
 // zone outlines lie on the ground rather than at eye level.
 const ZONE_GROUND_DROP_M = 1.5;
 
+// Top-down radar fill/stroke per zone, and its range (≈100 ft + margin).
+const ZONE_RADAR: Record<number, { fill: string; stroke: string }> = {
+  0: { fill: 'rgba(239,68,68,0.38)', stroke: '#ef4444' },
+  1: { fill: 'rgba(249,115,22,0.30)', stroke: '#f97316' },
+  2: { fill: 'rgba(234,179,8,0.22)', stroke: '#eab308' },
+};
+const RADAR_RANGE_M = 34;
+
 interface ZoneLine {
   line: THREE.LineLoop;
   ring: number[][]; // lng/lat pairs, re-projected each frame from the GPS fix
   positions: Float32Array;
+  zone: number;
+}
+
+// Draw a heading-up top-down radar of the zones around the user — always
+// visible regardless of AR pitch/tracking (the reliable iOS view).
+function drawZoneRadar(
+  canvas: HTMLCanvasElement | null,
+  pose: { coords: GeoCoordinates | null; heading: number | null },
+  zones: ZoneLine[]
+) {
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+  const w = canvas.width;
+  const c = w / 2;
+  ctx.clearRect(0, 0, w, w);
+  ctx.fillStyle = 'rgba(12,10,9,0.55)';
+  ctx.beginPath();
+  ctx.arc(c, c, c, 0, Math.PI * 2);
+  ctx.fill();
+  if (!pose.coords) return;
+
+  const h = ((pose.heading ?? 0) * Math.PI) / 180;
+  const cos = Math.cos(h);
+  const sin = Math.sin(h);
+  const scale = (c - 4) / RADAR_RANGE_M;
+  for (const { ring, zone } of zones) {
+    if (ring.length < 2) continue;
+    ctx.beginPath();
+    for (let i = 0; i < ring.length; i++) {
+      const enu = geoToEnu(pose.coords, { latitude: ring[i][1], longitude: ring[i][0] });
+      const right = enu.east * cos - enu.north * sin;
+      const fwd = enu.east * sin + enu.north * cos;
+      const x = c + right * scale;
+      const y = c - fwd * scale; // forward → up
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.closePath();
+    const col = ZONE_RADAR[zone] ?? ZONE_RADAR[2];
+    ctx.fillStyle = col.fill;
+    ctx.fill();
+    ctx.strokeStyle = col.stroke;
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+  }
+  // user dot + forward pointer
+  ctx.fillStyle = '#ffffff';
+  ctx.beginPath();
+  ctx.arc(c, c, 3, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(c, 5);
+  ctx.lineTo(c - 4, 14);
+  ctx.lineTo(c + 4, 14);
+  ctx.closePath();
+  ctx.fill();
 }
 
 // How far ahead of the user a dropped marker lands, along the current heading.
@@ -81,6 +146,7 @@ export function GeoMarkerOverlay({
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const markersRef = useRef<MarkerObj[]>([]);
   const zoneLinesRef = useRef<ZoneLine[]>([]);
+  const radarRef = useRef<HTMLCanvasElement>(null);
   const rafRef = useRef<number | null>(null);
 
   // Live pose kept in a ref so the render loop reads the latest without
@@ -165,7 +231,7 @@ export function GeoMarkerOverlay({
       const line = new THREE.LineLoop(geom, mat);
       line.frustumCulled = false; // verts are rewritten each frame from GPS
       scene.add(line);
-      built.push({ line, ring, positions });
+      built.push({ line, ring, positions, zone });
     }
     zoneLinesRef.current = built;
 
@@ -225,6 +291,8 @@ export function GeoMarkerOverlay({
         }
         renderer.render(scene, camera);
       }
+      // Always-visible top-down radar (independent of AR pitch/tracking).
+      drawZoneRadar(radarRef.current, poseRef.current, zoneLinesRef.current);
       rafRef.current = requestAnimationFrame(loop);
     };
     rafRef.current = requestAnimationFrame(loop);
@@ -287,12 +355,25 @@ export function GeoMarkerOverlay({
               'Acquiring GPS…'
             )}
             {pose.heading !== null ? ` · ${Math.round(pose.heading)}°` : ' · no compass'}
+            {pose.beta !== null ? ` · P${Math.round(pose.beta)}°` : ''}
             {defensibleZones && defensibleZones.length > 0
               ? ` · ${defensibleZones.length} zones`
               : ''}
           </div>
         )}
       </div>
+
+      {/* Top-down zone radar — always-visible view of the zones around you,
+          independent of AR pitch/tracking (the reliable path on iOS). */}
+      {enabled && (
+        <canvas
+          ref={radarRef}
+          width={180}
+          height={180}
+          className="absolute top-4 right-4 rounded-full pointer-events-none"
+          style={{ width: 92, height: 92 }}
+        />
+      )}
 
       {/* Drop a marker ahead (Phase 4: AR → map) */}
       {enabled && onPlace && pose.coords && (
