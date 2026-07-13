@@ -434,8 +434,9 @@ export function GeoMarkerOverlay({
       )}
 
       {/* Show/hide defensible space (ground fills + radar). Sits below the AR
-          mode selector (top-4 left) so it isn't covered by it. */}
-      {active && enabled && (
+          mode selector (top-4 left) so it isn't covered by it. Only shown when
+          zones are supplied (i.e. the 3D-model mode, not live scan). */}
+      {active && enabled && (defensibleZones?.length ?? 0) > 0 && (
         <button
           onClick={() => setShowZones((v) => !v)}
           className="absolute top-20 left-4 z-10 pointer-events-auto flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-black/55 backdrop-blur text-white text-xs font-medium shadow-lg"
@@ -447,7 +448,7 @@ export function GeoMarkerOverlay({
 
       {/* Top-down zone radar — always-visible view of the zones around you,
           independent of AR pitch/tracking (the reliable path on iOS). */}
-      {enabled && showZones && (
+      {enabled && showZones && (defensibleZones?.length ?? 0) > 0 && (
         <canvas
           ref={radarRef}
           width={180}

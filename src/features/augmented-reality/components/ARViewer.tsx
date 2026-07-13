@@ -5,7 +5,6 @@ import {
   CubeIcon,
   XMarkIcon,
   ExclamationTriangleIcon,
-  ScissorsIcon,
   EyeIcon,
   EyeSlashIcon,
 } from '@heroicons/react/24/outline';
@@ -47,6 +46,25 @@ function detectedRiskToCategory(type: string): RiskCategory {
   if (t.includes('water')) return 'water-supply';
   if (t.includes('clearance') || t.includes('defensible') || t.includes('structure')) return 'defensible-space';
   return 'vegetation';
+}
+
+// Heroicons v2 has no ruler, so define one for the measurement tool.
+function RulerIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.5}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden="true"
+    >
+      <rect x="2.5" y="8.5" width="19" height="7" rx="1.5" />
+      <path d="M6 8.5v3M9.5 8.5v2M13 8.5v3M16.5 8.5v2M20 8.5v3" />
+    </svg>
+  );
 }
 
 export default function ARViewer() {
@@ -253,7 +271,8 @@ export default function ARViewer() {
           annotations={geoAnnotations}
           active={isStreaming}
           onPlace={assessmentId ? setPendingArCoords : undefined}
-          defensibleZones={defensibleZones}
+          // Defensible-space zones only in the 3D-model view, not live scan.
+          defensibleZones={mode === '3d-model' ? defensibleZones : undefined}
           pose={arGeoPose}
         />
       )}
@@ -363,7 +382,7 @@ export default function ARViewer() {
             }`}
             title={isXRSupported ? 'Measurement (AR)' : 'Measurement (2D fallback)'}
           >
-            <ScissorsIcon className="w-5 h-5" />
+            <RulerIcon className="w-5 h-5" />
           </button>
         </div>
       </div>
