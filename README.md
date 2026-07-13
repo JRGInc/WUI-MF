@@ -11,6 +11,10 @@ connection returns.
 - **Offline store:** Dexie (IndexedDB) with a sync queue
 - **Backend:** Supabase (auth, Postgres + RLS, Storage)
 
+> 📖 **New here?** See the [**User Guide**](docs/USER_GUIDE.md) — an illustrated,
+> step-by-step walkthrough of how to use the app, from signing in to completing
+> and sharing an assessment.
+
 ## Getting started
 
 ```bash
@@ -308,6 +312,7 @@ deploy is picked up on the next reload.
 
 ## Documentation
 
+- [`docs/USER_GUIDE.md`](docs/USER_GUIDE.md) — illustrated end-user tutorial (with screenshots) for using the app.
 - [`docs/TEST_PLAN.md`](docs/TEST_PLAN.md) — end-user test plan covering every feature.
 - [`docs/SBOM.md`](docs/SBOM.md) — software bill of materials (dependencies, licenses, external data sources).
 - [`docs/legend/`](docs/legend/) — map legend key images used above.
