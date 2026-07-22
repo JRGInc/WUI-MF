@@ -51,7 +51,7 @@ When adding a new persisted entity: extend the Dexie schema (bump `version()` in
 
 ### Auth — DEV_MODE flag
 
-`src/app/providers/AuthProvider.tsx` has a top-level `const DEV_MODE = true` that bypasses Supabase auth entirely and injects a mock user/session. Real Supabase auth code lives behind `if (DEV_MODE)` early-returns. Flip to `false` to exercise the real flow. Do not assume `useAuth().user` reflects a real Supabase session in dev.
+`src/app/providers/AuthProvider.tsx` has a top-level `const DEV_MODE` flag. When `true`, it bypasses Supabase auth entirely and injects a mock user/session; real Supabase auth code lives behind `if (DEV_MODE)` early-returns. It is currently `false` (real Supabase auth is active) — flip to `true` to bypass auth for local UI work, but never ship it `true`, as that auto-logs-in a mock user for every visitor.
 
 ### Computer vision
 
