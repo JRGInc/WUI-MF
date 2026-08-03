@@ -67,6 +67,7 @@ export interface Database {
           category_scores: Json | null;
           findings: Json | null;
           recommendations: Json | null;
+          guideline_profile: string | null;
           created_at: string;
           completed_at: string | null;
         };
@@ -78,6 +79,7 @@ export interface Database {
           category_scores?: Json | null;
           findings?: Json | null;
           recommendations?: Json | null;
+          guideline_profile?: string | null;
           created_at?: string;
           completed_at?: string | null;
         };
@@ -89,6 +91,7 @@ export interface Database {
           category_scores?: Json | null;
           findings?: Json | null;
           recommendations?: Json | null;
+          guideline_profile?: string | null;
           created_at?: string;
           completed_at?: string | null;
         };

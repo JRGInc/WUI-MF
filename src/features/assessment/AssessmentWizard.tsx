@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { v4 as uuidv4 } from 'uuid';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -21,6 +21,13 @@ import {
 import { supabase } from '@/shared/services/supabaseClient';
 import { track } from '@/shared/services/analytics';
 import { showSuccessToast, showErrorToast } from '@/shared/stores/toastStore';
+import { resolveUsState } from '@/shared/utils/usState';
+import {
+  compositeProfile,
+  generateRecommendations,
+  resolveGuidelineProfile,
+  type GuidelineProfile,
+} from './content/guidelines';
 import { PropertyInfoStep } from './components/PropertyInfoStep';
 import { PhotoCaptureStep } from './components/PhotoCaptureStep';
 import { ChecklistStep } from './components/ChecklistStep';
@@ -89,6 +96,21 @@ export default function AssessmentWizard() {
     setWizardData((prev) => ({ ...prev, ...updates }));
   }, []);
 
+  // Inspection guidelines follow the property's US state (GPS first, then the
+  // typed address); the national composite is the fallback.
+  const [guidelineProfile, setGuidelineProfile] =
+    useState<GuidelineProfile>(compositeProfile);
+  const { address, coordinates } = wizardData.property;
+  useEffect(() => {
+    let cancelled = false;
+    resolveUsState({ address, coordinates }).then((stateCode) => {
+      if (!cancelled) setGuidelineProfile(resolveGuidelineProfile(stateCode));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [address, coordinates]);
+
   const canProceed = useCallback(() => {
     switch (currentStep) {
       case 0: // Property Info
@@ -148,7 +170,8 @@ export default function AssessmentWizard() {
         overallScore: calculateOverallScore(wizardData.categoryScores),
         categoryScores: wizardData.categoryScores,
         findings: wizardData.findings,
-        recommendations: generateRecommendations(wizardData.findings, wizardData.categoryScores),
+        recommendations: generateRecommendations(guidelineProfile, wizardData.categoryScores),
+        guidelineProfileId: guidelineProfile.id,
         createdAt: new Date().toISOString(),
         completedAt: new Date().toISOString(),
       };
@@ -172,6 +195,7 @@ export default function AssessmentWizard() {
           category_scores: assessment.categoryScores,
           findings: assessment.findings,
           recommendations: assessment.recommendations,
+          guideline_profile: assessment.guidelineProfileId,
           completed_at: assessment.completedAt,
         });
 
@@ -199,6 +223,7 @@ export default function AssessmentWizard() {
         overallScore: assessment.overallScore,
         findingCount: assessment.findings.length,
         photoCount: wizardData.photos.length,
+        guidelineProfile: guidelineProfile.id,
       });
 
       showSuccessToast('Assessment completed', 'Your assessment has been saved successfully.');
@@ -211,59 +236,6 @@ export default function AssessmentWizard() {
     }
   };
 
-  function generateRecommendations(_findings: Finding[], scores: CategoryScores) {
-    const recommendations = [];
-
-    if (scores.defensibleSpace < 7) {
-      recommendations.push({
-        id: uuidv4(),
-        category: 'defensible-space' as const,
-        priority: 'immediate' as const,
-        title: 'Harden the 0-5 ft Ember-Resistant Zone',
-        description:
-          'Clear the 0-5 ft Zone 0 to bare soil or noncombustible hardscape — remove all plants, combustible mulch, and stored items. Add a 5-ft noncombustible section where any fence meets the house, and reduce fuel in Zones 1-2.',
-        estimatedCost: '$500-2000',
-      });
-    }
-
-    if (scores.roofAndStructure < 7) {
-      recommendations.push({
-        id: uuidv4(),
-        category: 'roof-structure' as const,
-        priority: 'short-term' as const,
-        title: 'Upgrade Roof Materials',
-        description:
-          'Consider replacing wood shake roofing with Class A fire-rated materials.',
-        estimatedCost: '$5000-15000',
-      });
-    }
-
-    if (scores.vegetationManagement < 7) {
-      recommendations.push({
-        id: uuidv4(),
-        category: 'vegetation' as const,
-        priority: 'immediate' as const,
-        title: 'Vegetation Management',
-        description:
-          'Trim tree branches to maintain 10-foot clearance from structures and remove ladder fuels.',
-        estimatedCost: '$200-1000',
-      });
-    }
-
-    if (scores.emberIntrusion < 7) {
-      recommendations.push({
-        id: uuidv4(),
-        category: 'ember-intrusion' as const,
-        priority: 'short-term' as const,
-        title: 'Install WUI-Rated Ember-Resistant Vents',
-        description:
-          'Replace standard or mesh-only vents with WUI-rated ember- and flame-resistant vents tested to ASTM E2886 (State Fire Marshal listed). Plain 1/8-inch mesh does not stop wind-driven embers.',
-        estimatedCost: '$300-800',
-      });
-    }
-
-    return recommendations;
-  }
 
   const renderStep = () => {
     switch (currentStep) {
@@ -290,6 +262,7 @@ export default function AssessmentWizard() {
       case 2:
         return (
           <ChecklistStep
+            profile={guidelineProfile}
             responses={wizardData.checklistResponses}
             onUpdate={(checklistResponses, scores) =>
               updateWizardData({
@@ -305,6 +278,7 @@ export default function AssessmentWizard() {
             categoryScores={wizardData.categoryScores}
             findings={wizardData.findings}
             overallScore={calculateOverallScore(wizardData.categoryScores)}
+            profile={guidelineProfile}
           />
         );
       default:

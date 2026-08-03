@@ -5,11 +5,14 @@ import {
   ShieldCheckIcon,
 } from '@heroicons/react/24/outline';
 import type { CategoryScores, Finding, RiskLevel } from '@/shared/types';
+import type { GuidelineProfile } from '../content/guidelines';
 
 interface ResultsStepProps {
   categoryScores: CategoryScores;
   findings: Finding[];
   overallScore: number;
+  /** Guideline set the inspection followed, for provenance display. */
+  profile: GuidelineProfile;
 }
 
 function getScoreLevel(score: number): RiskLevel {
@@ -91,6 +94,7 @@ export function ResultsStep({
   categoryScores,
   findings,
   overallScore,
+  profile,
 }: ResultsStepProps) {
   const overallLevel = getScoreLevel(overallScore);
 
@@ -102,6 +106,29 @@ export function ResultsStep({
         </h2>
         <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
           Here's a summary of your property's wildfire risk assessment.
+        </p>
+        <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
+          Assessed against{' '}
+          {profile.stateCode ? `${profile.label} guidelines` : 'national composite guidelines'}
+          {' · '}
+          {profile.authority}
+        </p>
+        <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">{profile.basisNote}</p>
+        <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
+          Sources:{' '}
+          {profile.sources.map((source, i) => (
+            <span key={source.url}>
+              {i > 0 && ' · '}
+              <a
+                href={source.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="underline hover:text-gray-600 dark:hover:text-gray-300"
+              >
+                {source.title}
+              </a>
+            </span>
+          ))}
         </p>
       </div>
 

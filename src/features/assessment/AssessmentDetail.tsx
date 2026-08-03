@@ -10,6 +10,7 @@ import {
 import { supabase } from '@/shared/services/supabaseClient';
 import { getLocalAssessment, fromRow } from '@/shared/services/offlineStorage';
 import { PhotoGallery } from './components/PhotoGallery';
+import { guidelineProfileById } from './content/guidelines';
 import { LoadingSpinner } from '@/shared/components/LoadingScreen';
 import { ShareDialog } from '@/features/sharing/components/ShareDialog';
 import type { Assessment, Property, RiskLevel } from '@/shared/types';
@@ -139,6 +140,38 @@ export default function AssessmentDetail() {
                 {property.address}
               </p>
             )}
+            {assessment.guidelineProfileId &&
+              (() => {
+                const profile = guidelineProfileById(assessment.guidelineProfileId);
+                return (
+                  <div className="text-xs text-gray-400 dark:text-gray-500">
+                    <p>
+                      Assessed against{' '}
+                      {profile.stateCode
+                        ? `${profile.label} guidelines`
+                        : 'national composite guidelines'}
+                      {' · '}
+                      {profile.authority}
+                    </p>
+                    <p>
+                      Sources:{' '}
+                      {profile.sources.map((source, i) => (
+                        <span key={source.url}>
+                          {i > 0 && ' · '}
+                          <a
+                            href={source.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="underline hover:text-gray-600 dark:hover:text-gray-300"
+                          >
+                            {source.title}
+                          </a>
+                        </span>
+                      ))}
+                    </p>
+                  </div>
+                );
+              })()}
           </div>
         </div>
 

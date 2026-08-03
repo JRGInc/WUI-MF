@@ -35,6 +35,9 @@ export interface Assessment {
   categoryScores: CategoryScores;
   findings: Finding[];
   recommendations: Recommendation[];
+  /** Which guideline set the inspection followed (e.g. 'us-ca', 'composite');
+   * see src/features/assessment/content/guidelines. */
+  guidelineProfileId?: string;
   createdAt: string;
   completedAt?: string;
 }

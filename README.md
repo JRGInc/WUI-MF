@@ -70,11 +70,34 @@ Path aliases: `@/*` → `src/*`, plus `@features/*`, `@shared/*`, `@lib/*`.
 sync operation; `OfflineProvider` flushes the queue when the network returns.
 Photos are stored as Blobs locally and uploaded to Supabase Storage on sync.
 
+## State-localized inspection guidelines
+
+The inspection checklist follows the property's **US state**. During an
+assessment the app resolves the state fully offline — GPS coordinates are
+matched against bundled state boundaries, falling back to parsing the typed
+address — and selects that state's guideline profile from
+`src/features/assessment/content/guidelines/`. States with a wildfire code or
+their own published guidance (**24 as of Aug 2026** — e.g. California's
+PRC 4291/Zone 0, Colorado's Wildfire Resiliency Code, Utah's WUI Code) get
+state-specific checklist items, distances, and recommendations; everywhere
+else uses a **national composite** baseline (NFPA Firewise + IBHS).
+
+The checklist shows which guideline set is in use, its legal standing (state
+law / partly state law / state guidance / national baseline), and links to
+the official sources; the profile used is stored on the assessment
+(`guidelineProfileId`) so saved and shared reports keep their provenance.
+
+> 📋 See [**docs/INSPECTION_GUIDELINES.md**](docs/INSPECTION_GUIDELINES.md)
+> for a state-by-state record of exactly which guidelines were used to
+> determine the inspection parameters, with sources.
+
 ## Risk scoring
 
 An assessment is scored across **six categories**, each on a **0–10** integer
 scale, from a weighted Yes/No inspection checklist in the assessment wizard
-(`ChecklistStep.tsx`).
+(`ChecklistStep.tsx`). The items come from the property's resolved guideline
+profile (see above), so the exact questions and weights vary by state — the
+scoring math below is the same for every profile.
 
 > **Higher score = safer.** The scale measures preparedness/mitigation, so a
 > high score means *lower* wildfire risk.
@@ -95,8 +118,11 @@ Key details:
   category, so skipping questions lowers the score exactly like a "No".
 - The result is rounded to the nearest integer in **0–10**.
 
-There are **21 items** across the six categories, with these maximum weighted
-points (the denominator per category):
+Item counts and weights are per-profile. The **national composite** profile
+has **21 items** across the six categories, with these maximum weighted
+points (the denominator per category); state profiles add, replace, or
+re-weight items but every profile must cover all six categories
+(test-enforced — a missing category would zero its score):
 
 | Category (checklist key)          | Items | Max weight | Highest-weighted items (weight 3) |
 | --------------------------------- | ----- | ---------- | --------------------------------- |
@@ -108,7 +134,8 @@ points (the denominator per category):
 | Water supply (`water-supply`)         | 2 | 3  | — (max weight 2) |
 
 Each checklist item also carries an optional `standard` provenance tag
-(e.g. `CAL FIRE PRC 4291`, `CBC Chapter 7A`, `IBHS WFPH`) shown in the UI.
+(e.g. `CAL FIRE PRC 4291`, `CWUIC`, `IBHS WFPH`) shown in the UI, and each
+profile declares its legal basis and official source links.
 
 ### Overall score
 
@@ -313,6 +340,7 @@ deploy is picked up on the next reload.
 ## Documentation
 
 - [`docs/USER_GUIDE.md`](docs/USER_GUIDE.md) — illustrated end-user tutorial (with screenshots) for using the app.
+- [`docs/INSPECTION_GUIDELINES.md`](docs/INSPECTION_GUIDELINES.md) — state-by-state record of the guidelines behind the inspection checklist (legal basis, parameters, sources).
 - [`docs/TEST_PLAN.md`](docs/TEST_PLAN.md) — end-user test plan covering every feature.
 - [`docs/SBOM.md`](docs/SBOM.md) — software bill of materials (dependencies, licenses, external data sources).
 - [`docs/legend/`](docs/legend/) — map legend key images used above.

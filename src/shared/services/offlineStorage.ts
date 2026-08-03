@@ -111,6 +111,7 @@ const COLUMN_MAPS: Record<string, Record<string, string>> = {
     propertyId: 'property_id',
     overallScore: 'overall_score',
     categoryScores: 'category_scores',
+    guidelineProfileId: 'guideline_profile',
     createdAt: 'created_at',
     completedAt: 'completed_at',
   },
