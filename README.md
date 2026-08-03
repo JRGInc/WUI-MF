@@ -4,6 +4,9 @@ A mobile-first Progressive Web App for assessing wildfire risk on a property.
 Built to work **offline in the field** and sync back to Supabase when a
 connection returns.
 
+> 🌐 **Live system:** [firerisk.janusresearchgroup.workers.dev](https://firerisk.janusresearchgroup.workers.dev)
+> — hosted on Cloudflare Workers (static assets); deployed with `npm run deploy`.
+
 - **Stack:** Vite · React 18 · TypeScript
 - **Mapping:** Mapbox GL
 - **On-device CV:** TensorFlow.js
@@ -44,6 +47,7 @@ npm run preview    # serve the production build
 npm run lint       # eslint (max-warnings 0)
 npm run test       # vitest
 npm run test:e2e   # playwright
+npm run deploy     # build + wrangler deploy to Cloudflare Workers (firerisk)
 
 npm run export:training   # pull training-consented photos into a YOLO dataset
 npm run label:prepare     # build a SAM-assisted labeling bundle
