@@ -7,14 +7,8 @@ import {
   ArrowTopRightOnSquareIcon,
 } from '@heroicons/react/24/outline';
 import type { CategoryScores, RiskCategory } from '@/shared/types';
-import type { ChecklistItem, GuidelineBasis, GuidelineProfile } from '../content/guidelines';
-
-const BASIS_LABELS: Record<GuidelineBasis, string> = {
-  mandatory: 'State law',
-  'partial-mandate': 'Partly state law',
-  guidance: 'State guidance',
-  baseline: 'National baseline',
-};
+import { BASIS_LABELS } from '../content/guidelines';
+import type { ChecklistItem, GuidelineProfile } from '../content/guidelines';
 
 interface ChecklistStepProps {
   /** Guideline set resolved from the property's state (composite fallback). */

@@ -1,13 +1,17 @@
 import { useState } from 'react';
-import { MapPinIcon } from '@heroicons/react/24/outline';
+import { MapPinIcon, ClipboardDocumentCheckIcon } from '@heroicons/react/24/outline';
 import type { Property, GeoCoordinates } from '@/shared/types';
+import { BASIS_LABELS } from '../content/guidelines';
+import type { GuidelineProfile } from '../content/guidelines';
 
 interface PropertyInfoStepProps {
   data: Partial<Property>;
+  /** Guideline set resolved (live) from the address/GPS entered so far. */
+  profile: GuidelineProfile;
   onUpdate: (data: Partial<Property>) => void;
 }
 
-export function PropertyInfoStep({ data, onUpdate }: PropertyInfoStepProps) {
+export function PropertyInfoStep({ data, profile, onUpdate }: PropertyInfoStepProps) {
   const [isLocating, setIsLocating] = useState(false);
   const [locationError, setLocationError] = useState<string | null>(null);
 
@@ -127,6 +131,28 @@ export function PropertyInfoStep({ data, onUpdate }: PropertyInfoStepProps) {
             <p className="mt-2 text-sm text-red-600 dark:text-red-400">{locationError}</p>
           )}
         </div>
+
+        {/* Which inspection guidelines the entered location resolves to.
+            Only shown once there's an address or a GPS fix — before that,
+            announcing the composite fallback would just be noise. */}
+        {(data.coordinates || (data.address && data.address.trim().length > 0)) && (
+          <div className="flex items-start gap-2 rounded-lg bg-blue-50 dark:bg-blue-900/20 p-3">
+            <ClipboardDocumentCheckIcon className="w-5 h-5 shrink-0 text-blue-600 dark:text-blue-300" />
+            <div>
+              <p className="text-sm font-medium text-blue-800 dark:text-blue-200">
+                {profile.stateCode
+                  ? `${profile.label} detected — ${profile.label} guidelines will be used`
+                  : 'No state-specific guidelines for this location — the national composite will be used'}
+                <span className="ml-2 inline-block rounded-full bg-blue-100 dark:bg-blue-800/60 px-2 py-0.5 text-[10px] uppercase tracking-wide text-blue-700 dark:text-blue-200">
+                  {BASIS_LABELS[profile.basis]}
+                </span>
+              </p>
+              <p className="text-xs text-blue-700 dark:text-blue-300">
+                {profile.authority} — details on the Inspection step
+              </p>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Info Box */}

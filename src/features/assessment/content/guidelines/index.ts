@@ -36,6 +36,14 @@ export type {
 } from './types';
 export { compositeProfile };
 
+/** Short UI labels for a profile's legal standing. */
+export const BASIS_LABELS: Record<import('./types').GuidelineBasis, string> = {
+  mandatory: 'State law',
+  'partial-mandate': 'Partly state law',
+  guidance: 'State guidance',
+  baseline: 'National baseline',
+};
+
 /** State-specific profiles. The composite profile is the fallback and is not
  * listed here — `resolveGuidelineProfile` returns it for unmatched states. */
 export const STATE_GUIDELINE_PROFILES: GuidelineProfile[] = [

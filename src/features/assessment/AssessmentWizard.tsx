@@ -243,6 +243,7 @@ export default function AssessmentWizard() {
         return (
           <PropertyInfoStep
             data={wizardData.property}
+            profile={guidelineProfile}
             onUpdate={(property) => updateWizardData({ property })}
           />
         );
