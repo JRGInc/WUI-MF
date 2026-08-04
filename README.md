@@ -341,6 +341,32 @@ Configured in `vite.config.ts` via `vite-plugin-pwa` (`registerType:
 `.wasm`/`.tflite` model files. Because the service worker auto-updates, a new
 deploy is picked up on the next reload.
 
+## Service tiers & costs
+
+The live system runs entirely on free tiers today. Limits that matter for
+this app, and the cheapest paid step-up for each service (verified against
+vendor pricing pages, Aug 2026):
+
+| Service | Free-tier limits (relevant to this app) | Lowest paid tier |
+| --- | --- | --- |
+| **Supabase** (auth, Postgres, photo storage) | 500 MB database · **1 GB file storage** · 5 GB egress · 50K monthly active users · 500K edge-function invocations · max 2 active projects · **project pauses after 1 week of inactivity** | **Pro, from $25/mo** — 8 GB disk, 100 GB storage, 250 GB egress, 100K MAU, no pausing (overages metered, e.g. $0.09/GB egress) |
+| **Cloudflare Workers** (hosting) | 100K requests/day, 10 ms CPU per invocation — but **requests to static assets are free and unlimited**, and this app is deployed as static assets only, so hosting effectively has no usage cost | **Workers Paid, $5/mo** — 10M Worker requests + 30M CPU-ms included; only needed if server-side Worker logic is added |
+| **Mapbox** (map, geocoding, AR footprint tiles) | Pay-as-you-go with free monthly allowances — **50K map loads** (GL JS), **100K geocoding requests** (property search), **200K vector-tile requests** (AR building footprints) | No subscription — usage beyond free allowances bills automatically: $5/1,000 map loads, $0.75/1,000 geocodes, $0.25/1,000 tile requests |
+
+Practical implications:
+
+- **Supabase's 1 GB file storage is the first ceiling** — assessment photos
+  land in the `assessment-photos` bucket, so a few hundred field photos can
+  fill it. The **1-week inactivity pause** also stops auth and sync dead
+  until the project is manually restored; a production deployment should
+  budget for Pro ($25/mo).
+- **Cloudflare costs nothing** for this app as deployed (static assets are
+  unmetered on the free plan).
+- **Mapbox has no cliff** — it keeps working past the free allowance and
+  starts billing the attached card. 50K map loads/month is roughly 1,600
+  map-opens a day, far above current usage; the offline tile cache
+  (CacheFirst, 30 days) also suppresses repeat tile traffic in the field.
+
 ## Documentation
 
 - [`docs/USER_GUIDE.md`](docs/USER_GUIDE.md) — illustrated end-user tutorial (with screenshots) for using the app.
