@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import mapboxgl from 'mapbox-gl';
 import type { MapAnnotation } from '@/shared/types';
-import { RISK_CSS, TYPE_GLYPH, annotationRisk } from '@/shared/utils/annotationStyle';
+import { annotationColor, annotationGlyph } from '@/shared/utils/annotationStyle';
 
 function escapeHtml(s: string): string {
   return s
@@ -49,8 +49,8 @@ export function AnnotationMarker({ map, annotation, onClick }: AnnotationMarkerP
     if (!map) return;
     ensureStyle();
 
-    const color = RISK_CSS[annotationRisk(annotation.content)];
-    const glyph = TYPE_GLYPH[annotation.annotationType] ?? '•';
+    const color = annotationColor(annotation.annotationType, annotation.content);
+    const glyph = annotationGlyph(annotation.annotationType, annotation.content);
 
     const el = document.createElement('div');
     el.className = 'annotation-marker';

@@ -188,7 +188,8 @@ export type AnnotationType =
   | 'measurement'
   | 'photo-location'
   | 'recommendation'
-  | 'note';
+  | 'note'
+  | 'mitigation-icon';
 
 export interface AnnotationContent {
   title: string;
@@ -197,6 +198,9 @@ export interface AnnotationContent {
   photoId?: string;
   measurementValue?: number;
   measurementUnit?: string;
+  // For annotationType 'mitigation-icon': which palette icon was placed
+  // (an id from MITIGATION_ICONS in shared/utils/mitigationIcons.ts).
+  iconId?: string;
   // Which view placed this annotation. Both map and AR write the same
   // MapAnnotation; this records the origin so each view can label/round-trip it.
   source?: 'map' | 'ar';

@@ -229,6 +229,34 @@ The chosen point is pinned (labeled with the resolved address) and focused —
 the map flies to zoom 17 and draws its defensible-space zones — with a **Clear**
 option. Geocoding reuses the existing `VITE_MAPBOX_TOKEN`; no extra config.
 
+### Mitigation icon palette
+
+When the map is opened from an assessment (`/map/:assessmentId`), a horizontal
+icon palette appears at the bottom — a quick-place mode carried over from the
+original BFMA Unity app (its `MitigationIcon.ICONTYPE` set). Tap an icon to arm
+it, then every map tap drops that icon; tap the icon again to stop. The **?**
+button on the strip opens this same legend in-app. Placed icons render green
+(they mark an action to take, not a risk grade), are stored as
+`mitigation-icon` annotations through the same offline-first sync pipeline as
+other markers, appear live in the AR view, and fire a `map_icon_placed`
+analytics event.
+
+The catalog is defined in `src/shared/utils/mitigationIcons.ts` (single source
+of truth for the palette, the markers, and this table). Zone terminology
+matches the inspection guidelines: Zone 0 is the 0–5 ft ember-resistant zone,
+Zone 1 is 5–30 ft.
+
+| Icon | Name | When to place it |
+| --- | --- | --- |
+| 🧱 | **Debris — foundation** | Leaf litter, mulch, firewood, or stored items against the foundation or exterior walls. The 0–5 ft zone should be bare soil or noncombustible hardscape. |
+| 🏠 | **Debris — roof** | Leaves, needles, or branches on the roof, in gutters, or in roof valleys — wind-blown embers ignite this debris first. |
+| ✂️ | **Fire ladder — trim** | Trees whose lower limbs should be removed (limb up 6–10 ft) so ground fire cannot climb into the crown. |
+| 🌿 | **Fire ladder — vegetation** | Shrubs or small trees growing beneath a larger tree canopy; this understory carries ground fire into the crowns and should be removed or thinned. |
+| 🌳 | **Vegetation overhang** | Branches overhanging the roofline, deck, or chimney. Trim to keep ~10 ft of clearance between branches and the structure. |
+| 🪵 | **Vegetation underhang** | Vegetation or stored combustibles under a deck, porch, or eave — sheltered pockets where embers collect. Attached decks need their own 0–5 ft noncombustible zone. |
+| 🔥 | **HIZ 0–5 ft** | Any other Zone 0 hazard — combustible mulch, plants against walls, a wooden fence meeting the house, items stored near vents. |
+| 📏 | **HIZ 5–30 ft** | Any other Zone 1 hazard — unspaced or unmaintained vegetation, tall grass, woodpiles, or other combustibles within 30 ft of the structure. |
+
 ## Computer vision
 
 On-device inference runs in the browser with **TensorFlow.js** on its default

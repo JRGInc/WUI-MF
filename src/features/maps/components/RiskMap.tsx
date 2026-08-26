@@ -31,6 +31,8 @@ import { MapLegend } from './MapLegend';
 import { UserLocationMarker } from './UserLocationMarker';
 import { UserAccuracyCircle } from './UserAccuracyCircle';
 import { useAnnotations } from '../hooks/useAnnotations';
+import { MitigationIconPalette } from './MitigationIconPalette';
+import { mitigationIconById, type MitigationIconDef } from '@/shared/utils/mitigationIcons';
 import {
   DEFENSIBLE_ZONE_SPECS,
   circleZoneFeatures,
@@ -132,6 +134,8 @@ export default function RiskMap({
   const [draftTitle, setDraftTitle] = useState('');
   const [draftType, setDraftType] = useState<AnnotationType>('risk-marker');
   const [draftRisk, setDraftRisk] = useState<RiskLevel>('high');
+  // BFMA-style quick placement: the armed palette icon, dropped on every tap.
+  const [placingIcon, setPlacingIcon] = useState<MitigationIconDef | null>(null);
 
   // Property selection: pick a location by address (Mapbox geocoding) or by
   // tapping the map. The chosen point is focused (defensible-space zones drawn)
@@ -454,6 +458,7 @@ export default function RiskMap({
   const startPickingProperty = useCallback(() => {
     setShowSelectModal(false);
     setIsPlacing(false); // don't run alongside annotation placement
+    setPlacingIcon(null);
     setIsPickingProperty(true);
   }, []);
 
@@ -628,6 +633,41 @@ export default function RiskMap({
       if (canvas) canvas.style.cursor = '';
     };
   }, [isPlacing, mapLoaded]);
+
+  // BFMA-style icon placement: while a palette icon is armed, every map tap
+  // drops one (no form — the icon is the annotation). Stays armed for repeated
+  // placement until the icon is deselected.
+  useEffect(() => {
+    const m = map.current;
+    if (!m || !mapLoaded || !placingIcon) return;
+    const icon = placingIcon;
+
+    const handler = (e: mapboxgl.MapMouseEvent) => {
+      void addAnnotation({
+        coordinates: { latitude: e.lngLat.lat, longitude: e.lngLat.lng },
+        annotationType: 'mitigation-icon',
+        content: { title: icon.label, iconId: icon.id, source: 'map' },
+      });
+      void track('map_icon_placed', { icon: icon.id });
+    };
+    m.on('click', handler);
+    m.getCanvas().style.cursor = 'crosshair';
+
+    return () => {
+      m.off('click', handler);
+      const canvas = m.getCanvas();
+      if (canvas) canvas.style.cursor = '';
+    };
+  }, [placingIcon, mapLoaded, addAnnotation]);
+
+  const armIcon = useCallback((icon: MitigationIconDef | null) => {
+    setPlacingIcon(icon);
+    if (icon) {
+      setIsPlacing(false);
+      setIsPickingProperty(false);
+      setPendingCoords(null);
+    }
+  }, []);
 
   const handleSaveAnnotation = useCallback(async () => {
     if (!pendingCoords) return;
@@ -864,6 +904,7 @@ export default function RiskMap({
             onClick={() => {
               setIsPlacing((p) => !p);
               setPendingCoords(null);
+              setPlacingIcon(null);
             }}
             className={`flex items-center gap-2 px-3 py-2 rounded-lg shadow-lg text-sm font-medium ${
               isPlacing
@@ -943,6 +984,14 @@ export default function RiskMap({
         </div>
       )}
 
+      {/* Mitigation icon palette (BFMA-style quick placement). Annotations are
+          assessment-scoped, so it's only offered when opened from one. */}
+      {showControls && assessmentId && !selectedAnnotation && (
+        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10 max-w-[calc(100%-6rem)]">
+          <MitigationIconPalette selectedId={placingIcon?.id ?? null} onSelect={armIcon} />
+        </div>
+      )}
+
       {/* Selected-marker detail */}
       {selectedAnnotation && (
         <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20 w-full max-w-xs px-4">
@@ -958,6 +1007,11 @@ export default function RiskMap({
                     ? ` · ${selectedAnnotation.content.riskLevel} risk`
                     : ''}
                 </p>
+                {selectedAnnotation.content.iconId && (
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                    {mitigationIconById(selectedAnnotation.content.iconId)?.guidance}
+                  </p>
+                )}
               </div>
               <button
                 onClick={() => setSelectedAnnotation(null)}
