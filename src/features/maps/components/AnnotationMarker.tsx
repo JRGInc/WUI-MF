@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import mapboxgl from 'mapbox-gl';
 import type { MapAnnotation } from '@/shared/types';
-import { annotationColor, annotationGlyph } from '@/shared/utils/annotationStyle';
+import { annotationColor, annotationGlyph, annotationImage } from '@/shared/utils/annotationStyle';
 
 function escapeHtml(s: string): string {
   return s
@@ -27,6 +27,7 @@ function ensureStyle() {
       border: 2px solid rgba(255,255,255,0.85);
     }
     .annotation-glyph { transform: rotate(-45deg); color: #fff; font-size: 15px; line-height: 1; font-weight: 700; }
+    .annotation-icon-img { width: 34px; height: 34px; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.4)); }
     .annotation-label {
       margin-top: 6px; padding: 1px 7px; background: rgba(17,24,20,0.85); color: #fff;
       border-radius: 4px; font-size: 11px; font-weight: 500; white-space: nowrap; max-width: 160px;
@@ -49,15 +50,22 @@ export function AnnotationMarker({ map, annotation, onClick }: AnnotationMarkerP
     if (!map) return;
     ensureStyle();
 
+    // Mitigation icons render their NAPSG-style artwork (carried over from the
+    // BFMA Unity app); other annotation types keep the colored glyph tag.
+    const image = annotationImage(annotation.content);
     const color = annotationColor(annotation.annotationType, annotation.content);
-    const glyph = annotationGlyph(annotation.annotationType, annotation.content);
+    const glyph = annotationGlyph(annotation.annotationType);
 
     const el = document.createElement('div');
     el.className = 'annotation-marker';
     el.innerHTML = `
-      <div class="annotation-tag" style="background:${color}">
-        <span class="annotation-glyph">${glyph}</span>
-      </div>
+      ${
+        image
+          ? `<img class="annotation-icon-img" src="${image}" alt="" draggable="false">`
+          : `<div class="annotation-tag" style="background:${color}">
+               <span class="annotation-glyph">${glyph}</span>
+             </div>`
+      }
       <div class="annotation-label">${escapeHtml(annotation.content.title)}</div>
     `;
     if (onClick) el.addEventListener('click', onClick);

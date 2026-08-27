@@ -233,29 +233,87 @@ option. Geocoding reuses the existing `VITE_MAPBOX_TOKEN`; no extra config.
 
 When the map is opened from an assessment (`/map/:assessmentId`), a horizontal
 icon palette appears at the bottom — a quick-place mode carried over from the
-original BFMA Unity app (its `MitigationIcon.ICONTYPE` set). Tap an icon to arm
-it, then every map tap drops that icon; tap the icon again to stop. The **?**
-button on the strip opens this same legend in-app. Placed icons render green
-(they mark an action to take, not a risk grade), are stored as
-`mitigation-icon` annotations through the same offline-first sync pipeline as
-other markers, appear live in the AR view, and fire a `map_icon_placed`
-analytics event.
+original BFMA Unity app. Tap an icon to arm it, then every map tap drops that
+icon; tap the icon again to stop. The **?** button on the strip opens this same
+legend in-app. Placed icons are stored as `mitigation-icon` annotations through
+the same offline-first sync pipeline as other markers, appear live in the AR
+view, and fire a `map_icon_placed` analytics event.
 
-The catalog is defined in `src/shared/utils/mitigationIcons.ts` (single source
-of truth for the palette, the markers, and this table). Zone terminology
-matches the inspection guidelines: Zone 0 is the 0–5 ft ember-resistant zone,
-Zone 1 is 5–30 ft.
+**The artwork is BFMA's original NAPSG-style map symbology** — the 35 PNGs in
+`public/icons/mitigation/` are copied from the Unity project
+(`bfma_gold/Assets/Art/2D/MitigationIcons/_Round/`), so markers placed here
+read identically to the shipped mobile app. Round symbols mark property/HIZ
+items; diamond symbols mark parcel-level responder risks. The catalog —
+labels, categories, and usage guidance — is defined in
+`src/shared/utils/mitigationIcons.ts` (single source of truth for the palette,
+the markers, the in-app legend, and this table). Zone terminology matches the
+inspection guidelines: Zone 0 is the 0–5 ft ember-resistant zone, Zone 1 is
+5–30 ft, Zone 2 is 30–100 ft.
+
+#### Debris
 
 | Icon | Name | When to place it |
 | --- | --- | --- |
-| 🧱 | **Debris — foundation** | Leaf litter, mulch, firewood, or stored items against the foundation or exterior walls. The 0–5 ft zone should be bare soil or noncombustible hardscape. |
-| 🏠 | **Debris — roof** | Leaves, needles, or branches on the roof, in gutters, or in roof valleys — wind-blown embers ignite this debris first. |
-| ✂️ | **Fire ladder — trim** | Trees whose lower limbs should be removed (limb up 6–10 ft) so ground fire cannot climb into the crown. |
-| 🌿 | **Fire ladder — vegetation** | Shrubs or small trees growing beneath a larger tree canopy; this understory carries ground fire into the crowns and should be removed or thinned. |
-| 🌳 | **Vegetation overhang** | Branches overhanging the roofline, deck, or chimney. Trim to keep ~10 ft of clearance between branches and the structure. |
-| 🪵 | **Vegetation underhang** | Vegetation or stored combustibles under a deck, porch, or eave — sheltered pockets where embers collect. Attached decks need their own 0–5 ft noncombustible zone. |
-| 🔥 | **HIZ 0–5 ft** | Any other Zone 0 hazard — combustible mulch, plants against walls, a wooden fence meeting the house, items stored near vents. |
-| 📏 | **HIZ 5–30 ft** | Any other Zone 1 hazard — unspaced or unmaintained vegetation, tall grass, woodpiles, or other combustibles within 30 ft of the structure. |
+| <img src="public/icons/mitigation/debris.png" width="28"> | **Debris** | General combustible debris accumulations not covered by a more specific icon. |
+| <img src="public/icons/mitigation/foundation.png" width="28"> | **Debris — foundation/deck** | Leaf litter, mulch, firewood, or stored items against the foundation, walls, or deck. The 0–5 ft zone should be bare soil or noncombustible hardscape. |
+| <img src="public/icons/mitigation/roof.png" width="28"> | **Debris — roof/gutter** | Leaves, needles, or branches on the roof, in gutters, or in roof valleys — wind-blown embers ignite this debris first. |
+
+#### Vegetation & fuels
+
+| Icon | Name | When to place it |
+| --- | --- | --- |
+| <img src="public/icons/mitigation/ladder-trim.png" width="28"> | **Fire ladder — trim** | Trees whose lower limbs should be removed (limb up 6–10 ft) so ground fire cannot climb into the crown. |
+| <img src="public/icons/mitigation/ladder-veg.png" width="28"> | **Fire ladder — vegetation** | Shrubs or small trees beneath a larger canopy; this understory carries ground fire into the crowns. |
+| <img src="public/icons/mitigation/overhang.png" width="28"> | **Vegetation overhang** | Branches overhanging the roofline, deck, or chimney — keep ~10 ft of clearance. |
+| <img src="public/icons/mitigation/underhang.png" width="28"> | **Vegetation underhang** | Vegetation under eaves, overhangs, or sheltered walls where embers collect. |
+| <img src="public/icons/mitigation/vegetation-spacing.png" width="28"> | **Vegetation spacing** | Zone 1 shrubs or canopies too close together — keep ~10 ft between canopies, more on slopes. |
+| <img src="public/icons/mitigation/fuel-packet.png" width="28"> | **Fuel packet** | A dense, continuous pocket of fuels that can carry fire toward the structure. |
+| <img src="public/icons/mitigation/proximity-fuel-source.png" width="28"> | **Proximity to fuel source** | Structure close to a major fuel source — woodpile, brush field, dense adjacent vegetation. |
+| <img src="public/icons/mitigation/bedding-materials.png" width="28"> | **Bedding materials** | Combustible mulch in planting beds near the structure — replace with gravel in the 0–5 ft zone. |
+
+#### Structure & hardening
+
+| Icon | Name | When to place it |
+| --- | --- | --- |
+| <img src="public/icons/mitigation/structure.png" width="28"> | **Structure** | The primary structure the assessment is anchored to. |
+| <img src="public/icons/mitigation/secondary-structure.png" width="28"> | **Secondary structure** | Sheds/outbuildings within the HIZ — each needs its own clearance. |
+| <img src="public/icons/mitigation/structure-repair.png" width="28"> | **Structural repairs needed** | Damaged roofing, siding, soffits, or trim leaving ember entry gaps. |
+| <img src="public/icons/mitigation/roofing-material.png" width="28"> | **Roofing material** | Combustible roof covering (e.g. wood shake) — Class A is the biggest hardening upgrade. |
+| <img src="public/icons/mitigation/siding-material.png" width="28"> | **Siding material(s)** | Combustible siding, especially near grade. |
+| <img src="public/icons/mitigation/vents-screens.png" width="28"> | **Vents/Screens** | Vents without intact 1/8-inch metal mesh — a primary ember entry path. |
+| <img src="public/icons/mitigation/attached-fencing.png" width="28"> | **Attached fencing** | A wooden fence meeting the house acts as a fuse — replace the final 5 ft with a noncombustible section. |
+| <img src="public/icons/mitigation/deck-storage-under.png" width="28"> | **Deck — storage under** | Items stored under a deck or porch; decks need a clear 0–5 ft noncombustible zone. |
+| <img src="public/icons/mitigation/deck-vegetation-under.png" width="28"> | **Deck — vegetation under** | Vegetation growing beneath a deck or porch — embers collect in these pockets. |
+| <img src="public/icons/mitigation/solar-electrical.png" width="28"> | **Solar/electrical risk** | Solar arrays, batteries, or electrical equipment responders should know about. |
+
+#### Access & water supply
+
+| Icon | Name | When to place it |
+| --- | --- | --- |
+| <img src="public/icons/mitigation/parcel-access.png" width="28"> | **Parcel access risk** | Overall difficult apparatus access — gates, grade, surface, clearance. |
+| <img src="public/icons/mitigation/road-width.png" width="28"> | **Road width** | Road too narrow for apparatus plus evacuation traffic. |
+| <img src="public/icons/mitigation/driveway.png" width="28"> | **Driveway length/width** | Long, narrow, or overgrown driveway limiting engine access. |
+| <img src="public/icons/mitigation/adequate-turnaround.png" width="28"> | **Adequate turnaround** | A usable apparatus turnaround — mark it for responders. |
+| <img src="public/icons/mitigation/inadequate-turnaround.png" width="28"> | **Inadequate turnaround** | No way for apparatus to turn around — a dead-end approach. |
+| <img src="public/icons/mitigation/distance-hydrant.png" width="28"> | **Distance to hydrant** | The nearest hydrant or drafting source, to record water-supply distance. |
+| <img src="public/icons/mitigation/poor-escape.png" width="28"> | **Poor escape risk** | Limited evacuation egress — a single way out or routes through heavy fuels. |
+
+#### Responder hazards
+
+| Icon | Name | When to place it |
+| --- | --- | --- |
+| <img src="public/icons/mitigation/hazmat.png" width="28"> | **Hazmat risk** | Stored hazardous materials — fuels, chemicals, pesticides. |
+| <img src="public/icons/mitigation/propane-gas.png" width="28"> | **Propane/gas risk** | Propane tanks or gas service — keep 10 ft around tanks clear. |
+| <img src="public/icons/mitigation/overhead-power.png" width="28"> | **Overhead power risk** | Overhead lines crossing access routes or near vegetation. |
+| <img src="public/icons/mitigation/pets.png" width="28"> | **Pets risk** | Pets or livestock on site, for responder and evacuation awareness. |
+
+#### Home ignition zones
+
+| Icon | Name | When to place it |
+| --- | --- | --- |
+| <img src="public/icons/mitigation/hiz.png" width="28"> | **HIZ 0–5 ft** | Any other Zone 0 hazard — combustible mulch, plants against walls, items near vents. |
+| <img src="public/icons/mitigation/hiz-30.png" width="28"> | **HIZ 5–30 ft** | Any other Zone 1 hazard — unspaced vegetation, tall grass, woodpiles within 30 ft. |
+| <img src="public/icons/mitigation/hiz-100.png" width="28"> | **HIZ 30–100 ft** | Zone 2 hazards — heavy fuel accumulations, dense stands, or slash within 30–100 ft. |
 
 ## Computer vision
 

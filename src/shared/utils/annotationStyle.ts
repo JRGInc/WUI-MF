@@ -1,5 +1,5 @@
 import type { AnnotationContent, AnnotationType, RiskLevel } from '@/shared/types';
-import { mitigationIconById } from './mitigationIcons';
+import { mitigationIconById, mitigationIconUrl } from './mitigationIcons';
 
 // Single source of truth for how annotations look in both the map markers and
 // the AR overlay, so a "high-risk note" reads the same in either view.
@@ -42,7 +42,13 @@ export function annotationColor(type: AnnotationType, content: AnnotationContent
   return type === 'mitigation-icon' ? MITIGATION_CSS : RISK_CSS[annotationRisk(content)];
 }
 
-/** Marker glyph: the placed palette icon for mitigation icons, else the type glyph. */
-export function annotationGlyph(type: AnnotationType, content: AnnotationContent): string {
-  return mitigationIconById(content.iconId)?.glyph ?? TYPE_GLYPH[type] ?? '•';
+/** Marker glyph for non-image annotations (mitigation icons render artwork instead). */
+export function annotationGlyph(type: AnnotationType): string {
+  return TYPE_GLYPH[type] ?? '•';
+}
+
+/** Artwork URL for a mitigation-icon annotation; undefined for other types. */
+export function annotationImage(content: AnnotationContent): string | undefined {
+  const icon = mitigationIconById(content.iconId);
+  return icon ? mitigationIconUrl(icon.id) : undefined;
 }
