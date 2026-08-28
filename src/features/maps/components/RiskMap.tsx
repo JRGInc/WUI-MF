@@ -850,9 +850,10 @@ export default function RiskMap({
         </div>
       )}
 
-      {/* Layer controls */}
+      {/* Layer controls (slightly narrower on phones so the row fits). z-20 so
+          the expanded checklist sits above the legend/palette bar below it. */}
       {showControls && (
-        <div className="absolute top-4 right-4 z-10 w-48">
+        <div className="absolute top-4 right-4 z-20 w-44 sm:w-48">
           <LayerToggle
             layers={layers.map((layer) => ({
               ...layer,
@@ -868,7 +869,11 @@ export default function RiskMap({
           target (mirrors the AR view's "Enable AR positioning" button). Hidden
           once we have a fix. */}
       {showControls && mapLoaded && !userLocation.coords && (
-        <div className="absolute top-16 left-1/2 -translate-x-1/2 z-10">
+        <div
+          className={`absolute left-1/2 -translate-x-1/2 z-10 ${
+            assessmentId ? 'top-28 sm:top-16' : 'top-16'
+          }`}
+        >
           <button
             onClick={getCurrentLocation}
             className="flex items-center gap-2 px-3 py-2 rounded-lg bg-fire-600 text-white text-sm font-medium shadow-lg hover:bg-fire-700"
@@ -894,12 +899,11 @@ export default function RiskMap({
         </div>
       )}
 
-      {/* Per-layer legend — a key appears only while its layer is visible */}
-      <MapLegend layers={layers} />
-
-      {/* Place-marker toggle (only when opened from an assessment) */}
+      {/* Place-marker toggle (only when opened from an assessment). On phones the
+          top row is taken by the style selector and Layers panel, so it drops to
+          a second row; from `sm` up it sits centered in the top row. */}
       {showControls && assessmentId && (
-        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-10">
+        <div className="absolute top-16 sm:top-4 left-1/2 -translate-x-1/2 z-10">
           <button
             onClick={() => {
               setIsPlacing((p) => !p);
@@ -984,13 +988,32 @@ export default function RiskMap({
         </div>
       )}
 
-      {/* Mitigation icon palette (BFMA-style quick placement). Annotations are
-          assessment-scoped, so it's only offered when opened from one. */}
-      {showControls && assessmentId && !selectedAnnotation && (
-        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10 max-w-[calc(100%-6rem)]">
-          <MitigationIconPalette selectedId={placingIcon?.id ?? null} onSelect={armIcon} />
-        </div>
-      )}
+      {/* Bottom overlay bar: per-layer legend + mitigation icon palette.
+          Laying these out with flex (instead of independent absolute positions)
+          guarantees they never overlap each other, and `right-16` reserves the
+          column occupied by MapControls (bottom-right); `bottom-10` keeps the Mapbox
+          wordmark (bottom-left) uncovered. Portrait/phone: legend
+          stacked above the palette; `sm` and up: side by side. The bar's top is
+          pinned (below the centered pills above it) so it has a definite height
+          for the legend to scroll within; pointer-events pass through the empty
+          parts to the map. */}
+      <div
+        className={`absolute bottom-10 left-4 right-16 z-10 flex flex-col justify-end sm:flex-row sm:items-end gap-2 pointer-events-none ${
+          assessmentId ? 'top-40 sm:top-28' : 'top-28'
+        }`}
+      >
+        <MapLegend
+          layers={layers}
+          className="pointer-events-auto min-h-0 self-start sm:self-auto sm:shrink-0 sm:max-h-full"
+        />
+        {/* Mitigation icon palette (BFMA-style quick placement). Annotations are
+            assessment-scoped, so it's only offered when opened from one. */}
+        {showControls && assessmentId && !selectedAnnotation && (
+          <div className="pointer-events-auto min-w-0 shrink-0 sm:shrink sm:max-h-full sm:overflow-y-auto">
+            <MitigationIconPalette selectedId={placingIcon?.id ?? null} onSelect={armIcon} />
+          </div>
+        )}
+      </div>
 
       {/* Selected-marker detail */}
       {selectedAnnotation && (

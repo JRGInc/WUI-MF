@@ -99,7 +99,17 @@ function LayerKey({ layer }: { layer: MapLayer }) {
 // A stacked key that shows one card per *visible* layer — the key for a layer
 // appears only while that layer is turned on. Each card's body can be
 // hidden/unhidden independently via its header (the title stays as the handle).
-export function MapLegend({ layers }: { layers: MapLayer[] }) {
+//
+// The legend does not position itself — the parent decides where it goes
+// (RiskMap slots it into the bottom overlay bar) and passes layout classes via
+// `className`.
+export function MapLegend({
+  layers,
+  className = '',
+}: {
+  layers: MapLayer[];
+  className?: string;
+}) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const visible = layers.filter((l) => l.visible);
   if (visible.length === 0) return null;
@@ -113,7 +123,7 @@ export function MapLegend({ layers }: { layers: MapLayer[] }) {
     });
 
   return (
-    <div className="absolute bottom-10 left-4 z-10 flex flex-col gap-2 max-h-[calc(70%-1.5rem)] overflow-y-auto">
+    <div className={`flex flex-col gap-2 overflow-y-auto ${className}`}>
       {visible.map((layer) => {
         const isCollapsed = collapsed.has(layer.id);
         return (
