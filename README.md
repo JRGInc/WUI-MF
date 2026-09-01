@@ -317,35 +317,39 @@ inspection guidelines: Zone 0 is the 0–5 ft ember-resistant zone, Zone 1 is
 
 ## Computer vision
 
-On-device inference runs in the browser with **TensorFlow.js** on its default
-backend (WebGL). Models are fetched once, then cached in IndexedDB via TF.js's
-`indexeddb://` scheme so later loads are offline; the service worker
-additionally caches `.wasm`/`.tflite` assets. Code lives in
+On-device inference runs in the browser through two runtimes: the **WUI hazard
+detector** (JANUS's 19-class YOLOv8s from BFMA, ONNX via **onnxruntime-web**,
+self-hosted wasm in `public/ort/`) and **TensorFlow.js** for the DeepLab
+segmentation path (backend order `webgpu → webgl → cpu`, chosen once per
+session in `tfBackend.ts`; override with `?tfBackend=` / `localStorage['tf-backend']`).
+Models are fetched once and cached — TF.js models in IndexedDB via the
+`indexeddb://` scheme, the ONNX model and wasm runtime by the service worker's
+`model-cache` — so later loads work offline. Code lives in
 `src/features/computer-vision/`.
 
 ### Two runtime pipelines
 
-| Pipeline | Entry | Model | Input | IndexedDB cache key |
-| -------- | ----- | ----- | ----- | ------------------- |
-| **Still assessment photos** | `useImageAnalysis` (assessment `PhotoCaptureStep`, `ImageAnalyzer`) | DeepLab v3 **ADE20K** semantic segmentation | 513² | `indexeddb://deeplab-ade20k-q2` |
-| **Live AR scan** | `useLiveFrameAnalysis` → `useFrameAnalysisLoop` → `getActiveAnalyzer()` (`ARViewer`) | DeepLab ADE20K (default) **or** YOLO11n-seg COCO (opt-in prototype) | 513² / 512² | `…deeplab-ade20k-q2` / `indexeddb://yolo11n-seg-coco-512` |
+| Pipeline | Entry | Model | Input | Cache |
+| -------- | ----- | ----- | ----- | ----- |
+| **Still assessment photos** | `useImageAnalysis` (assessment `PhotoCaptureStep`) | WUI detector (findings) **+** DeepLab v3 **ADE20K** (coverage/score/debris) | 640² / 513² | SW `model-cache` / `indexeddb://deeplab-ade20k-q2` |
+| **Live AR scan** | `useLiveFrameAnalysis` → `useFrameAnalysisLoop` → `getActiveAnalyzer()` (`ARViewer`) | WUI detector (default; falls back to DeepLab if it can't load) | 640² | SW `model-cache` |
 
-The live loop's analyzer is selectable at runtime for A/B latency tests:
-`?cvModel=yolo` in the URL, or `localStorage['cv-model'] = 'yolo'`; otherwise it
-defaults to DeepLab (`frameAnalyzer.ts`).
+The live loop's analyzer is selectable at runtime for A/B tests:
+`?cvModel=wui | deeplab` in the URL, or `localStorage['cv-model']`. Default is
+the WUI detector (`frameAnalyzer.ts`). (The YOLO11n-seg COCO plumbing
+prototype was removed 2026-09-01: its pretrained Ultralytics weights were
+AGPL-3.0 — see `docs/SBOM.md`.)
+
+The WUI detector's classes map to state-localized guideline checklist items
+via `detectionGuidance.ts` (assessment content), so captured detections cite
+the jurisdiction's actual question and standard. Its accuracy is tracked by a
+golden-image evaluation (`npm run eval:detector`) with a recorded per-class
+recall baseline.
 
 The DeepLab path produces an ADE20K class map, which `vegetationSegmenter.ts`
 turns into `DetectedRisk`s via helpers: `coverageOf`, `hasGroundFuel`,
-`vegToStructureProximity`, `classBoundingBoxes`, and `risksFromClassMap`.
-
-> **Note — legacy scaffolding, not imported anywhere:**
-> `services/inferenceService.ts` (an `InferenceService` class with
-> `runVegetationSegmentation` / `runRoofClassification` / `runDebrisDetection` /
-> `analyzeCompleteImage`) and `hooks/useModelLoader.ts` (which selects a
-> `webgpu → webgl → wasm → cpu` backend) both have no importers. The live code
-> paths are the two pipelines above; treat these as reference, not the active
-> API. (A future task could route the active pipelines through the WebGPU-
-> preferring loader.)
+`vegToStructureProximity`, `classBoundingBoxes`, and `risksFromClassMap` (all
+unit-tested against synthetic class maps).
 
 ### Hazard taxonomy
 
@@ -357,6 +361,11 @@ negative tag: `dry-dead-vegetation`, `ground-fuels`, `overhanging-vegetation`,
 `combustible-mulch`. Class indices 0–8 are frozen (the last two were appended)
 so already-labeled data stays valid. The training scripts parse `HAZARD_TAGS`
 directly rather than duplicating the list.
+
+These 11 user-facing *condition* tags coexist with the WUI detector's 19
+*object* classes; the plan for unifying them (objects detect, conditions
+annotate) is in [`docs/TAXONOMY.md`](docs/TAXONOMY.md) — read it before
+merging labeled data or training the next model.
 
 ### Training-data & labeling workflow
 
@@ -371,6 +380,12 @@ labeling and convert the result back for the browser:
    - `npm run export:training` — pull **training-consented** assessment photos
      from Supabase into a YOLO dataset layout (uses `SUPABASE_SERVICE_ROLE_KEY`
      if set, else the anon key).
+   - `npm run import:consented` — fold those exported photos into the
+     triaged-keep pool so they reach the labeling bundle (idempotent).
+   - `npm run flywheel` — the two steps above chained. **Run this on a
+     schedule** (e.g. weekly cron on a machine with the service-role key) so
+     field photos flow continuously into the labeling queue; consented photos
+     still need a PII pass (faces, plates, house numbers) before labeling.
 2. `npm run label:prepare` — build a **SAM-assisted** labeling bundle from the
    triaged-keep pool: `classes.txt`, Ultralytics `dataset.yaml`, and a
    Label-Studio PolygonLabels config + tasks (tool-agnostic; also works with
@@ -378,11 +393,14 @@ labeling and convert the result back for the browser:
 3. **Label** the instance masks (self-hosted CVAT + GPU SAM in this project's
    setup). `scripts/make-labeling-examples.py` generates the good-vs-loose mask
    example for the labeling guide.
-4. **Train** YOLO11n-seg (Ultralytics), then
-   `scripts/export-yolo-tfjs.sh` converts it to a TF.js graph model
-   (PyTorch → ONNX → TF SavedModel → TF.js) for the browser. `imgsz` must match
-   `INPUT_SIZE` in `yoloSegmenter.ts`, and the model is served from
-   `/models/yolo11n-seg_web_model/`.
+4. **Train** the next hazard detector — training stack and class mapping per
+   [`docs/TAXONOMY.md`](docs/TAXONOMY.md) (stack choice pending the Ultralytics
+   AGPL determination, `docs/SBOM.md`). The browser deployment contract is
+   fixed regardless: ONNX detect head, `imgsz` 640, input `images`
+   `[1,3,640,640]`, output `output0` `[1, 4+C, anchors]` — served from
+   `/models/` and decoded by `wuiDetector.ts` (update `WUI_CLASSES` /
+   `DETECTION_GUIDANCE`, then `npm run eval:detector` must beat the recorded
+   baseline).
 
 ## Augmented reality
 

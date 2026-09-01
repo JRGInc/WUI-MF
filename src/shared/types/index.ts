@@ -156,6 +156,10 @@ export interface DetectedRisk {
   boundingBox?: BoundingBox;
   severity: RiskLevel;
   description: string;
+  // Machine-readable detector class (e.g. 'firewood') when the risk came from
+  // the WUI detector — keys the typed detection→guideline mapping. `type` is
+  // the display label and must never be used as a lookup key.
+  sourceClass?: string;
 }
 
 export interface BoundingBox {

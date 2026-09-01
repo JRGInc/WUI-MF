@@ -26,6 +26,7 @@ import {
   copyFileSync,
   rmSync,
   readdirSync,
+  statSync,
 } from 'node:fs';
 import { resolve, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -114,8 +115,25 @@ if (kept.length === 0) {
 // --- build bundle ------------------------------------------------------------
 
 // Fresh images dir each run so removed/re-triaged images don't linger.
-if (existsSync(join(outDir, 'images'))) rmSync(join(outDir, 'images'), { recursive: true });
-mkdirSync(join(outDir, 'images'), { recursive: true });
+// Guard: if images/ contains subdirectories, someone hand-organized the
+// bundle (e.g. the 13 CVAT `task N/` folders of the 2026-06 campaign) —
+// refuse to destroy that work unless --force is passed.
+const imagesDir = join(outDir, 'images');
+if (existsSync(imagesDir)) {
+  const hasSubdirs = readdirSync(imagesDir).some((name) =>
+    statSync(join(imagesDir, name)).isDirectory()
+  );
+  if (hasSubdirs && !process.argv.includes('--force')) {
+    console.error(
+      `${imagesDir} contains subdirectories (a hand-organized labeling campaign?).\n` +
+        'Re-running would DELETE that organization. Pass --force to rebuild anyway,\n' +
+        'or use --out to write a fresh bundle elsewhere.'
+    );
+    process.exit(1);
+  }
+  rmSync(imagesDir, { recursive: true });
+}
+mkdirSync(imagesDir, { recursive: true });
 
 let linked = 0;
 let copied = 0;
@@ -138,6 +156,8 @@ writeFileSync(
     '# Ultralytics YOLO-seg dataset. Fill train/val after splitting the',
     '# labeled set (e.g. 80/20). Labels go in a sibling labels/ dir, YOLO-seg',
     '# polygon format: <class> <x1> <y1> <x2> <y2> ... (normalized).',
+    '# NOTE: absolute path — re-run label:prepare (or edit this line) if the',
+    '# repo moves (it went stale once when the repo moved to WUI-MF/).',
     `path: ${outDir}`,
     'train: images',
     'val: images',
@@ -231,8 +251,11 @@ ${n} triaged images, ${classes.length} classes. Regenerate this bundle anytime w
 
     npm run label:prepare
 
-Goal: produce YOLO-seg polygon labels, then train a YOLO11n-seg model
-(scripts/export-yolo-tfjs.sh deploys the result to the browser).
+Goal: produce polygon labels, then train the next hazard detector. Before
+training, read docs/TAXONOMY.md — it defines the unified class list, the
+class mapping for these labels, and the browser deployment contract
+(ONNX for wuiDetector.ts). The training stack is a pending program decision
+(Ultralytics is AGPL-3.0 — see docs/SBOM.md).
 
 ## Option A — Label Studio + Segment Anything (local, free, SAM-assisted)
 
@@ -292,10 +315,12 @@ and exports the exact Ultralytics YOLO-seg format this pipeline trains on.
 
 ## After labeling — train & deploy
 
-    # in the yolo export venv (see scripts/export-yolo-tfjs.sh)
-    yolo segment train model=yolo11n-seg.pt data=${join(dir, 'dataset.yaml')} imgsz=512 epochs=100
-    # then convert best.pt -> TF.js for the browser:
-    YOLO_WEIGHTS=runs/segment/train/weights/best.pt scripts/export-yolo-tfjs.sh
+Training stack and class mapping are defined by docs/TAXONOMY.md (decision
+pending — Ultralytics' stack is AGPL-3.0; see docs/SBOM.md). Whatever the
+stack, the browser deployment contract is fixed: ONNX detect head, imgsz 640,
+input "images" [1,3,640,640], output "output0" [1, 4+C, anchors] — it drops
+into src/features/computer-vision/services/wuiDetector.ts (update WUI_CLASSES
+and DETECTION_GUIDANCE, then run npm run eval:detector and beat the baseline).
 
 ## Notes
 

@@ -158,3 +158,12 @@ owner — class order already matches `classes.txt` / `dataset.yaml` in this fol
 - Mulch bed = #10; natural litter = #1.
 - No hazards? Submit empty.
 - Face / plate / house number visible? Flag it, don't label it.
+
+---
+
+**Note for the campaign lead (added 2026-09-01):** these 11 classes remain the
+label config for this campaign — keep labeling exactly as above. A proposal to
+unify them with the WUI detector's 19 object classes (your masks map over
+losslessly; no re-labeling) is in `docs/TAXONOMY.md` in the repo. It needs a
+decision **before the finished labels are merged for training**, not before
+labeling.

@@ -1,4 +1,5 @@
 import * as tf from '@tensorflow/tfjs';
+import { initTfBackend } from './tfBackend';
 import type { DetectedRisk, RiskLevel } from '@/shared/types';
 
 // DeepLab v3 ADE20K (int16 quantized, ~13 MB). Direct GraphModel load — bypasses
@@ -42,6 +43,9 @@ class VegetationSegmenter {
     if (this.loadPromise) return this.loadPromise;
 
     this.loadPromise = (async () => {
+      // Settle backend choice (WebGPU on iOS 26 / Chrome, else WebGL) before
+      // any tensor is created — the active backend when the first op runs wins.
+      await initTfBackend();
       onProgress?.(0.05);
       try {
         const cached = await tf.loadGraphModel(IDB_KEY);
@@ -153,34 +157,54 @@ export function hasGroundFuel(
 }
 
 // Minimum Chebyshev pixel distance between any structure pixel and any vegetation
-// pixel, normalized to [0,1] over the larger image dimension. Returns 1 if either
-// class is absent. Coarse: samples every 4th pixel for both masks.
+// pixel, normalized to [0,1] over the larger image dimension. Returns 1 if
+// either class is absent. Exact multi-source BFS (8-connected expansion =
+// Chebyshev rings) from all structure pixels until the first vegetation pixel
+// — O(pixels), replacing a sampled O(veg × struct) scan that could approach
+// ~10⁸ comparisons on the main thread for a leafy scene with a house.
 export function vegToStructureProximity(
   classMap: Uint8Array,
   width: number,
   height: number
 ): number {
-  const veg: number[] = [];
-  const struct: number[] = [];
-  for (let i = 0; i < classMap.length; i += 4) {
-    if (ADE20K.VEGETATION.has(classMap[i])) veg.push(i);
-    else if (ADE20K.STRUCTURE.has(classMap[i])) struct.push(i);
-  }
-  if (veg.length === 0 || struct.length === 0) return 1;
-
-  let minDist = Infinity;
-  for (const v of veg) {
-    const vx = v % width;
-    const vy = (v / width) | 0;
-    for (const s of struct) {
-      const sx = s % width;
-      const sy = (s / width) | 0;
-      const d = Math.max(Math.abs(vx - sx), Math.abs(vy - sy));
-      if (d < minDist) minDist = d;
-      if (minDist === 0) return 0;
+  const size = classMap.length;
+  const visited = new Uint8Array(size);
+  let frontier: number[] = [];
+  let hasVeg = false;
+  for (let i = 0; i < size; i++) {
+    if (ADE20K.STRUCTURE.has(classMap[i])) {
+      frontier.push(i);
+      visited[i] = 1;
+    } else if (!hasVeg && ADE20K.VEGETATION.has(classMap[i])) {
+      hasVeg = true;
     }
   }
-  return minDist / Math.max(width, height);
+  if (frontier.length === 0 || !hasVeg) return 1;
+
+  let dist = 0;
+  while (frontier.length > 0) {
+    dist++;
+    const next: number[] = [];
+    for (const i of frontier) {
+      const x = i % width;
+      const y = (i / width) | 0;
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          if (dx === 0 && dy === 0) continue;
+          const nx = x + dx;
+          const ny = y + dy;
+          if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
+          const ni = ny * width + nx;
+          if (visited[ni]) continue;
+          if (ADE20K.VEGETATION.has(classMap[ni])) return dist / Math.max(width, height);
+          visited[ni] = 1;
+          next.push(ni);
+        }
+      }
+    }
+    frontier = next;
+  }
+  return 1;
 }
 
 // Connected-component bounding boxes for a given class set. Iterative flood fill,

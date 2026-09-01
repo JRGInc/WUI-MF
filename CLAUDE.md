@@ -16,7 +16,11 @@ npm run lint       # eslint . --ext ts,tsx (max-warnings 0)
 npm run test       # vitest (watch mode)
 npm run test:e2e   # playwright
 npm run export:training  # pull training-consented photos from Supabase into a YOLO dataset layout (training-data/)
+npm run import:consented # fold exported consented photos into the labeling pool (training-data/harvest/)
+npm run flywheel         # export:training + import:consented — the scheduled data-collection loop
 npm run label:prepare    # build a SAM-assisted labeling bundle from triaged-keep images (training-data/labeling/)
+npm run eval:detector    # golden-image evaluation of the WUI hazard detector (per-class recall vs recorded baseline)
+npm run sync:ort         # re-copy onnxruntime-web runtime/wasm into public/ort/ after upgrading the package
 ```
 
 Run a single Vitest file: `npm run test -- path/to/file.test.ts`. Run a single test: `npm run test -- -t "test name"`. Playwright single spec: `npx playwright test path/to/spec.ts`.
@@ -55,7 +59,7 @@ When adding a new persisted entity: extend the Dexie schema (bump `version()` in
 
 ### Computer vision
 
-`src/features/computer-vision/` runs TensorFlow.js models in the browser. `inferenceService.ts` exposes preprocessing (`preprocessImage`) and per-task inference (e.g. `runVegetationSegmentation`) using `tf.tidy()` for memory management. Models are cached in Dexie's `cachedModels` table by name+version. `@tensorflow/tfjs` is included in `optimizeDeps` (prebundled in dev — excluding it serves ~1200 raw modules and breaks on CJS files) and split into its own manual chunk in production builds.
+`src/features/computer-vision/` runs two in-browser inference runtimes. The default hazard detector is `wuiDetector.ts` — JANUS's 19-class YOLOv8s (ONNX, fp16) via onnxruntime-web, with the runtime self-hosted in `public/ort/` (re-copy with `npm run sync:ort` after upgrading the package); its classes map to guideline checklist items via `detectionGuidance.ts`. The DeepLab ADE20K segmenter (`vegetationSegmenter.ts`, TensorFlow.js) provides vegetation coverage and the fallback when the detector can't load; analyzers are registered in `frameAnalyzer.ts` (`?cvModel=` override). Model caching: TF.js models in TF.js's own IndexedDB store (`indexeddb://` keys), the ONNX + wasm via the service worker's `model-cache` runtime rule. `@tensorflow/tfjs` is included in `optimizeDeps` (prebundled in dev — excluding it serves ~1200 raw modules and breaks on CJS files) and split into its own manual chunk in production builds; onnxruntime-web is deliberately NOT bundled (its runtime is loaded from `/ort/` at runtime — bundling it drags a 28 MB WebGPU wasm into dist).
 
 ### Defensible space & AR (shared geometry)
 
@@ -81,6 +85,6 @@ Supabase row shapes use `snake_case` (`src/shared/types/database.ts`); domain ty
 
 ## Notes
 
-- Docs live in `docs/`: `TEST_PLAN.md` (end-user tests) and `SBOM.md` (dependencies/licenses/data sources).
+- Docs live in `docs/`: `TEST_PLAN.md` (end-user tests), `SBOM.md` (dependencies/licenses/data sources — includes the unresolved Ultralytics AGPL flag on both YOLO model artifacts), and `TAXONOMY.md` (the proposal unifying the detector's 19 object classes with the 11 hazard-condition tags — read before merging labeled data or training).
 - `nul` in repo root is a stray Windows artifact (likely a `> nul` redirect on the wrong platform) — safe to ignore/delete.
 - `src/lib/` is aliased as `@lib` but does not exist yet.

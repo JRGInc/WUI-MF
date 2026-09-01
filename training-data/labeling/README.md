@@ -4,8 +4,11 @@
 
     npm run label:prepare
 
-Goal: produce YOLO-seg polygon labels, then train a YOLO11n-seg model
-(scripts/export-yolo-tfjs.sh deploys the result to the browser).
+Goal: produce polygon labels, then train the next hazard detector. Before
+training, read docs/TAXONOMY.md (unified class list, mapping for these
+labels, and the browser deployment contract — ONNX for wuiDetector.ts).
+The training stack is a pending program decision (Ultralytics is AGPL-3.0;
+see docs/SBOM.md).
 
 ## Option A — Label Studio + Segment Anything (local, free, SAM-assisted)
 
@@ -65,10 +68,12 @@ and exports the exact Ultralytics YOLO-seg format this pipeline trains on.
 
 ## After labeling — train & deploy
 
-    # in the yolo export venv (see scripts/export-yolo-tfjs.sh)
-    yolo segment train model=yolo11n-seg.pt data=/mnt/d/workspace/WebWUI/training-data/labeling/dataset.yaml imgsz=512 epochs=100
-    # then convert best.pt -> TF.js for the browser:
-    YOLO_WEIGHTS=runs/segment/train/weights/best.pt scripts/export-yolo-tfjs.sh
+Training stack and class mapping are defined by docs/TAXONOMY.md (decision
+pending — Ultralytics' stack is AGPL-3.0; see docs/SBOM.md). Whatever the
+stack, the browser deployment contract is fixed: ONNX detect head, imgsz 640,
+input "images" [1,3,640,640], output "output0" [1, 4+C, anchors] — it drops
+into src/features/computer-vision/services/wuiDetector.ts (update WUI_CLASSES
+and DETECTION_GUIDANCE, then run npm run eval:detector and beat the baseline).
 
 ## Notes
 

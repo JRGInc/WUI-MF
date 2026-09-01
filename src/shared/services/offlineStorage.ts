@@ -21,7 +21,6 @@ class WildfireRiskDB extends Dexie {
   annotations!: Table<MapAnnotation & { localId?: string }>;
   trainingProgress!: Table<TrainingProgress>;
   syncQueue!: Table<SyncOperation>;
-  cachedModels!: Table<{ name: string; data: ArrayBuffer; version: string }>;
   cachedTrainingContent!: Table<{ id: string; content: unknown; cachedAt: string }>;
   analyticsEvents!: Table<AnalyticsEvent & { localId?: number }>;
 
@@ -49,6 +48,13 @@ class WildfireRiskDB extends Dexie {
     // through the sync queue (same offline-first path as everything else).
     this.version(3).stores({
       analyticsEvents: '++localId, id, event, createdAt',
+    });
+
+    // v4: drop cachedModels — it was never written. Real model caching lives
+    // in TF.js's own IndexedDB store (`indexeddb://` keys in the CV services)
+    // and the service worker's model-cache (ONNX + wasm runtime).
+    this.version(4).stores({
+      cachedModels: null,
     });
   }
 }
@@ -512,21 +518,6 @@ export async function syncPhoto(localId: number): Promise<void> {
     });
     throw error;
   }
-}
-
-// Model caching
-export async function cacheModel(
-  name: string,
-  data: ArrayBuffer,
-  version: string
-): Promise<void> {
-  await db.cachedModels.put({ name, data, version });
-}
-
-export async function getCachedModel(
-  name: string
-): Promise<{ data: ArrayBuffer; version: string } | undefined> {
-  return db.cachedModels.get(name);
 }
 
 // Training content caching

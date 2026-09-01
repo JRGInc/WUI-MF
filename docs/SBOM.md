@@ -25,7 +25,10 @@ machine-readable transitive SBOM, generate CycloneDX with
 | pbf | 5.1.2 | BSD-3-Clause | Protocol-buffer decoder (pairs with @mapbox/vector-tile) |
 | @turf/buffer | 7.3.5 | MIT | Buffer building footprints into defensible-space zones |
 | three | 0.166.1 | MIT | 3D / WebXR / AR rendering |
-| @tensorflow/tfjs | 4.22.0 | Apache-2.0 | On-device computer-vision inference |
+| geomagnetism | 0.2.0 | Apache-2.0 | World Magnetic Model — compass declination correction for AR heading |
+| @tensorflow/tfjs | 4.22.0 | Apache-2.0 | On-device computer-vision inference (DeepLab segmentation path) |
+| onnxruntime-web | 1.29.0 | MIT | On-device ONNX inference (WUI hazard detector); wasm runtime served from `public/ort/` |
+| BFMA WUI detector model (`public/models/bfma-yolov8s-wui/model.onnx`) | Ultralytics 8.2.76 export, 2024-08-14 | **⚠️ AGPL-3.0 tag (Ultralytics)** — JANUS-trained weights (19-class WUI taxonomy); reused from the BFMA app. Licensing determination pending — see below | Primary hazard detection |
 | @supabase/supabase-js | 2.108.2 | MIT | Supabase client (auth, Postgres, Storage) |
 | dexie | 4.4.4 | Apache-2.0 | IndexedDB wrapper (offline store) |
 | dexie-react-hooks | 1.1.7 | Apache-2.0 | React bindings for Dexie |
@@ -68,6 +71,26 @@ machine-readable transitive SBOM, generate CycloneDX with
   distribution.
 - `npm audit` reports advisories that are predominantly in dev tooling. Do **not**
   run `npm audit fix --force` — it breaks the PWA build (see project notes).
+- **⚠️ ML model weights — Ultralytics AGPL-3.0 question (unresolved).** Two model
+  artifacts were produced with the Ultralytics training/export stack, whose license
+  is AGPL-3.0 unless an Ultralytics Enterprise license is held:
+  1. `public/models/bfma-yolov8s-wui/model.onnx` — JANUS-trained 19-class WUI
+     detector reused from the BFMA app (its embedded metadata carries the
+     Ultralytics AGPL-3.0 tag). **The primary hazard detector.**
+  2. ~~`public/models/yolo11n-seg_web_model/` — pretrained COCO YOLO11n-seg
+     prototype weights (AGPL-3.0 per its `metadata.yaml`)~~ — **removed
+     2026-09-01** along with its `yoloSegmenter.ts` code path: redistributing
+     Ultralytics' own pretrained weights was the clearest-cut exposure, and
+     the plumbing prototype had served its purpose. Users who previously
+     loaded it may retain a cached copy in their browser's IndexedDB
+     (`indexeddb://yolo11n-seg-coco-512`); nothing in the app reads it.
+  Ultralytics' position is that models trained/exported with its stack inherit
+  AGPL obligations. A written determination (Enterprise license, removal, or
+  acceptance of AGPL terms) is needed from JANUS legal before wide distribution;
+  the same question applies to the BFMA app itself, which ships these weights.
+- The DeepLab v3 ADE20K segmentation model is **fetched at runtime** from Kaggle
+  Models (TensorFlow-published, Apache-2.0) and cached in IndexedDB — it is not
+  in the repo but is part of the deployed software's material.
 
 ## External runtime services & data sources
 

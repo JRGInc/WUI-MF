@@ -55,6 +55,10 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2,wasm}'],
+        // The ONNX runtime (14 MB wasm) and detector model are far over the
+        // precache size limit — they're cached at runtime by the model-cache
+        // rule below instead.
+        globIgnores: ['**/ort/**', '**/models/**'],
         runtimeCaching: [
           {
             urlPattern: /^https:\/\/api\.mapbox\.com\/.*/i,
@@ -96,7 +100,10 @@ export default defineConfig({
             }
           },
           {
-            urlPattern: /\.(?:wasm|tflite)$/,
+            // ML runtime + model binaries: the WUI detector's ONNX (22 MB) and
+            // onnxruntime-web's wasm — too big to precache, cached on first use
+            // so the detector works offline afterwards.
+            urlPattern: /\/ort\/|\/models\/|\.(?:wasm|tflite|onnx)$/,
             handler: 'CacheFirst',
             options: {
               cacheName: 'model-cache',
@@ -140,8 +147,9 @@ export default defineConfig({
     // Prebundle tfjs in dev: without this it is served as ~1200 raw ESM/CJS
     // modules, which breaks in the browser (CJS `module is not defined`) and
     // crawls over remote tunnels. Production chunking is handled separately
-    // by manualChunks below.
-    include: ['@tensorflow/tfjs']
+    // by manualChunks below (the webgpu backend matches the '@tensorflow/tfjs'
+    // substring check there, so it lands in the same 'tensorflow' chunk).
+    include: ['@tensorflow/tfjs', '@tensorflow/tfjs-backend-webgpu']
   },
   build: {
     target: 'esnext',

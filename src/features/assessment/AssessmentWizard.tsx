@@ -251,6 +251,7 @@ export default function AssessmentWizard() {
         return (
           <PhotoCaptureStep
             photos={wizardData.photos}
+            guidelineProfile={guidelineProfile}
             onUpdate={(photos) => updateWizardData({ photos })}
             onAnalysisComplete={(findings, scores) =>
               updateWizardData({

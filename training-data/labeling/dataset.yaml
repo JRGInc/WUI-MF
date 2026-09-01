@@ -1,7 +1,8 @@
 # Ultralytics YOLO-seg dataset. Fill train/val after splitting the
 # labeled set (e.g. 80/20). Labels go in a sibling labels/ dir, YOLO-seg
 # polygon format: <class> <x1> <y1> <x2> <y2> ... (normalized).
-path: /mnt/d/workspace/WebWUI/training-data/labeling
+# NOTE: absolute path — re-check after moving the repo (went stale once already).
+path: /mnt/d/workspace/WUI-MF/WebWUI/training-data/labeling
 train: images
 val: images
 names:

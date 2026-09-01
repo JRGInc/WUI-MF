@@ -10,6 +10,8 @@ import {
   ExclamationTriangleIcon,
 } from '@heroicons/react/24/outline';
 import { useImageAnalysis } from '@/features/computer-vision/hooks/useImageAnalysis';
+import { findingContentForDetection } from '../content/guidelines/detectionGuidance';
+import type { GuidelineProfile } from '../content/guidelines';
 import { HAZARD_TAGS } from '@/shared/types';
 import type {
   AssessmentPhoto,
@@ -23,6 +25,9 @@ interface PhotoCaptureStepProps {
   photos: AssessmentPhoto[];
   onUpdate: (photos: AssessmentPhoto[]) => void;
   onAnalysisComplete: (findings: Finding[], scores: Partial<CategoryScores>) => void;
+  // Active guideline profile — WUI-detector findings cite its localized
+  // checklist question and file under the matched item's category.
+  guidelineProfile?: GuidelineProfile;
 }
 
 const HAZARD_TAG_LABELS: Record<HazardTag, string> = {
@@ -67,6 +72,7 @@ export function PhotoCaptureStep({
   photos,
   onUpdate,
   onAnalysisComplete,
+  guidelineProfile,
 }: PhotoCaptureStepProps) {
   const [selectedCategory, setSelectedCategory] = useState<RiskCategory>('defensible-space');
   const [isCapturing, setIsCapturing] = useState(false);
@@ -135,15 +141,22 @@ export function PhotoCaptureStep({
           current = current.map((p) => (p.id === photo.id ? photo : p));
           onUpdate(current);
 
-          // Convert detected risks to findings
-          const findings: Finding[] = result.detectedRisks.map((risk) => ({
-            id: uuidv4(),
-            category: selectedCategory,
-            severity: risk.severity,
-            title: risk.type,
-            description: risk.description,
-            photoIds: [photo.id],
-          }));
+          // Convert detected risks to findings. WUI-detector risks file under
+          // their guideline category and cite the active profile's checklist
+          // question; other risks keep the user-selected photo category.
+          const findings: Finding[] = result.detectedRisks.map((risk) => {
+            const guidance = guidelineProfile
+              ? findingContentForDetection(risk, guidelineProfile)
+              : null;
+            return {
+              id: uuidv4(),
+              category: guidance?.category ?? selectedCategory,
+              severity: risk.severity,
+              title: risk.type,
+              description: guidance?.description ?? risk.description,
+              photoIds: [photo.id],
+            };
+          });
 
           // Calculate scores based on analysis
           const scores: Partial<CategoryScores> = {};
@@ -195,6 +208,10 @@ export function PhotoCaptureStep({
         <span>
           <span className="block text-sm font-medium text-gray-900 dark:text-white">
             Contribute photos to improve hazard detection
+          </span>
+          <span className="block mt-0.5 text-xs text-fire-700 dark:text-fire-400">
+            Real inspection photos are the most valuable training data — they match the
+            conditions the detector sees in the field.
           </span>
           <span className="block mt-0.5 text-xs text-gray-500 dark:text-gray-400">
             If enabled, photos from this assessment (with the hazard tags you add)

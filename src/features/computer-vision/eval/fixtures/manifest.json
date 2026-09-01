@@ -1,0 +1,82 @@
+{
+  "description": "Golden-image fixtures for the WUI detector evaluation (wuiDetector.eval.test.ts). `expect` lists detector classes a human verified as clearly visible — image-level ground truth, not exhaustive box labels. Images are drawn from the license-policed training-data/harvest pool (CC0/PD/CC BY, attribution below) plus JANUS's own Boise field photos.",
+  "fixtures": [
+    {
+      "file": "commons-866246.jpg",
+      "expect": ["firewood"],
+      "note": "Close-up stacked firewood filling the frame",
+      "license": "Public domain",
+      "attribution": "Mobius, via Wikimedia Commons"
+    },
+    {
+      "file": "openverse-45ddf5e4-1dcc-4a1e-8b38-b9408b260689.jpg",
+      "expect": ["firewood"],
+      "note": "Close-up split firewood stack",
+      "license": "CC BY 2.0",
+      "attribution": "\"Firewood stacked up to dry showing annual rings\" by Horia Varlan"
+    },
+    {
+      "file": "commons-48393871.jpg",
+      "expect": ["fence", "window"],
+      "note": "Green wooden house behind a decorative wood fence",
+      "license": "CC BY 2.0",
+      "attribution": "amanderson2, via Wikimedia Commons"
+    },
+    {
+      "file": "commons-76851620.jpg",
+      "expect": ["tree", "window", "roof"],
+      "note": "Residential street: houses, mature trees, porches",
+      "license": "CC BY 2.0",
+      "attribution": "Eric Fischer, via Wikimedia Commons"
+    },
+    {
+      "file": "openverse-e9089ec9-cd08-4123-a68d-47be53b4ae01.jpg",
+      "expect": ["roof", "tree", "window"],
+      "note": "Shake-roof stone cottage under a large tree",
+      "license": "CC BY 2.0",
+      "attribution": "\"Charlevoix - Mushroom House\" by Kathleen Tyler Conklin"
+    },
+    {
+      "file": "openverse-ff557474-a167-4062-93d6-065cdcce92aa.jpg",
+      "expect": ["door", "plant"],
+      "note": "Stone-arched door overgrown with weeds (out-of-distribution structure)",
+      "license": "CC BY 2.0",
+      "attribution": "\"Gunwalloe Church Door\" by Tim Green aka atoach"
+    },
+    {
+      "file": "openverse-601af1af-3ee7-40dc-9e74-cf19dee46997.jpg",
+      "expect": ["window", "door"],
+      "note": "Ornate white house with railed steps",
+      "license": "CC BY 2.0",
+      "attribution": "\"Bellingham, Washington\" by Hugo-90"
+    },
+    {
+      "file": "openverse-55df0b29-6cfb-49bc-b30c-27490810d7cf.jpg",
+      "expect": ["gutter", "window"],
+      "note": "Night flash shot of leaf-filled gutters (hard case)",
+      "license": "CC BY 2.0",
+      "attribution": "\"Day 322: Someone Should Really Clean These Gutters\" by theogeo"
+    },
+    {
+      "file": "boise-f7241d07f0.jpg",
+      "expect": ["solar_panel", "roof", "window", "deck", "tree"],
+      "note": "Boise field photo: house with rooftop solar and elevated wood deck",
+      "license": "JANUS field photo (internal)",
+      "attribution": "JANUS Research Group / Boise field collection"
+    },
+    {
+      "file": "boise-d058599086.jpg",
+      "expect": ["deck", "window", "furniture"],
+      "note": "Boise field photo: rear balcony deck with outdoor furniture",
+      "license": "JANUS field photo (internal)",
+      "attribution": "JANUS Research Group / Boise field collection"
+    },
+    {
+      "file": "commons-87048445.jpg",
+      "expect": ["tree", "roof"],
+      "note": "Backyard under heavy tree overhang, tiled outbuilding roof",
+      "license": "CC BY 4.0",
+      "attribution": "Vandevorst, Kris, via Wikimedia Commons"
+    }
+  ]
+}

@@ -3,6 +3,7 @@ import {
   vegetationSegmenter,
   risksFromClassMap,
 } from '../services/vegetationSegmenter';
+import { wuiDetector } from '../services/wuiDetector';
 import type { CVAnalysisResult, DetectedRisk } from '@/shared/types';
 
 type AnalyzerMode = 'model' | 'heuristic';
@@ -63,14 +64,36 @@ export function useImageAnalysis() {
   return { analyzeImage, isAnalyzing, isModelLoaded, loadingProgress };
 }
 
-// ---------- Model path (DeepLab ADE20K) ----------
+// ---------- Model path (WUI detector + DeepLab ADE20K) ----------
+
+// The WUI detector (19 real home-ignition-zone classes) is best-effort here:
+// its detections lead the findings list, while DeepLab keeps providing the
+// vegetation coverage/score/debris estimates a detector can't. If the WUI
+// model can't load (offline first launch), the DeepLab result stands alone.
+let wuiStillUnavailable = false;
+
+async function wuiRisks(imageBitmap: ImageBitmap): Promise<DetectedRisk[]> {
+  if (wuiStillUnavailable) return [];
+  try {
+    return (await wuiDetector.analyze(imageBitmap)).risks;
+  } catch (err) {
+    wuiStillUnavailable = true;
+    console.warn('WUI detector unavailable for photo analysis:', err);
+    return [];
+  }
+}
 
 async function analyzeWithModel(
   imageBitmap: ImageBitmap,
   startTime: number
 ): Promise<CVAnalysisResult> {
-  const { classMap, width, height } = await vegetationSegmenter.segment(imageBitmap);
-  const { risks: detectedRisks, coverage } = risksFromClassMap(classMap, width, height);
+  const [segmented, wuiDetections] = await Promise.all([
+    vegetationSegmenter.segment(imageBitmap),
+    wuiRisks(imageBitmap),
+  ]);
+  const { classMap, width, height } = segmented;
+  const { risks: segRisks, coverage } = risksFromClassMap(classMap, width, height);
+  const detectedRisks = [...wuiDetections, ...segRisks];
 
   const vegetationScore = Math.max(1, Math.round((1 - coverage / 100) * 10));
   const debrisLevel: 'none' | 'light' | 'moderate' | 'heavy' =
@@ -91,6 +114,10 @@ async function analyzeWithModel(
 // ---------- Heuristic fallback (RGB color thresholding) ----------
 // Kept for first-launch offline + browsers where the model load fails.
 
+// Coverage is a ratio, so the heuristic doesn't need full resolution — a 4K
+// photo was ~8M pixel iterations on the main thread for the same answer.
+const HEURISTIC_MAX_DIM = 512;
+
 function analyzeWithHeuristic(
   imageBitmap: ImageBitmap,
   startTime: number
@@ -98,9 +125,10 @@ function analyzeWithHeuristic(
   const canvas = document.createElement('canvas');
   const ctx = canvas.getContext('2d');
   if (!ctx) return null;
-  canvas.width = imageBitmap.width;
-  canvas.height = imageBitmap.height;
-  ctx.drawImage(imageBitmap, 0, 0);
+  const scale = Math.min(1, HEURISTIC_MAX_DIM / Math.max(imageBitmap.width, imageBitmap.height));
+  canvas.width = Math.max(1, Math.round(imageBitmap.width * scale));
+  canvas.height = Math.max(1, Math.round(imageBitmap.height * scale));
+  ctx.drawImage(imageBitmap, 0, 0, canvas.width, canvas.height);
   const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
 
   const veg = countVegetationPixels(imageData);
