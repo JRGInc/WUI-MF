@@ -22,6 +22,35 @@ export function disposeMarkerSprite(sprite: THREE.Sprite): void {
   sprite.material.dispose();
 }
 
+// A billboarded pill label (no pin) for in-world readouts — e.g. the distance
+// label at a measurement segment's midpoint. Sized for XR near-field (metres).
+export function makeTextPillSprite(text: string): THREE.Sprite {
+  const canvas = document.createElement('canvas');
+  canvas.width = 512;
+  canvas.height = 128;
+  const ctx = canvas.getContext('2d')!;
+
+  ctx.font = 'bold 56px ui-sans-serif, system-ui, sans-serif';
+  const w = Math.min(496, ctx.measureText(text).width + 56);
+  ctx.fillStyle = 'rgba(17,24,20,0.85)';
+  roundRect(ctx, 256 - w / 2, 20, w, 88, 20);
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+  ctx.lineWidth = 4;
+  ctx.stroke();
+  ctx.fillStyle = '#fff';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(text, 256, 66);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.needsUpdate = true;
+  const material = new THREE.SpriteMaterial({ map: texture, depthTest: false, transparent: true });
+  const sprite = new THREE.Sprite(material);
+  sprite.scale.set(0.6, 0.15, 1);
+  return sprite;
+}
+
 function makeLabelTexture(title: string, risk: RiskLevel): THREE.CanvasTexture {
   const canvas = document.createElement('canvas');
   canvas.width = 512;

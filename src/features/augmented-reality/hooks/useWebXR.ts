@@ -46,13 +46,21 @@ export function useWebXR() {
 
       const init: XRSessionInit = {
         requiredFeatures: ['hit-test', 'local-floor'],
-        optionalFeatures: [
-          'dom-overlay',
-          'anchors',
-          'light-estimation',
-          'depth-sensing',
-          'camera-access',
-        ],
+        // Every optional feature here is consumed: anchors hold the geo
+        // content (WebXRScene), camera-access feeds live CV, and depth-sensing
+        // drives occlusion. Don't request features nothing uses.
+        optionalFeatures: ['dom-overlay', 'anchors', 'depth-sensing', 'camera-access'],
+        // Required for depth-sensing to be granted (Chrome rejects the feature
+        // without preferences). gpu-optimized + luminance-alpha is what
+        // three.js's built-in occlusion path consumes: WebXRManager binds the
+        // depth texture and the renderer runs a depth prepass that occludes
+        // depth-tested content (zones, reticle, measurements) behind real
+        // geometry. Marker pins/labels render with depthTest:false and stay
+        // visible through walls by design — same choice BFMA makes for icons.
+        depthSensing: {
+          usagePreference: ['gpu-optimized'],
+          dataFormatPreference: ['luminance-alpha', 'float32'],
+        },
       };
       if (options.domOverlayRoot) {
         init.domOverlay = { root: options.domOverlayRoot };

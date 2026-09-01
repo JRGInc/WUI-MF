@@ -15,9 +15,12 @@ import { CameraFallback } from './CameraFallback';
 import { RiskAnnotation } from './RiskAnnotation';
 import { GeoMarkerOverlay } from './GeoMarkerOverlay';
 import { useGeoPose } from '../hooks/useGeoPose';
+import { distanceMeters } from '../utils/geoEnu';
 import { useAnnotations } from '@/features/maps/hooks/useAnnotations';
 import { useLiveFrameAnalysis } from '@/features/computer-vision/hooks/useLiveFrameAnalysis';
-import { addFindingToAssessment } from '@/shared/services/offlineStorage';
+import { addFindingToAssessment, getLocalAssessment } from '@/shared/services/offlineStorage';
+import { guidelineProfileById } from '@/features/assessment/content/guidelines';
+import { findingContentForDetection } from '@/features/assessment/content/guidelines/detectionGuidance';
 import { circleZoneFeatures, footprintZoneFeatures } from '@/shared/utils/defensibleZones';
 import { fetchBuildingFootprint } from '@/shared/utils/buildingFootprint';
 import { track } from '@/shared/services/analytics';
@@ -35,6 +38,13 @@ type ARMode = 'camera-overlay' | '3d-model' | 'measurement';
 
 const SCAN_INTERVAL_MS = 2500;
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN || '';
+
+// Zone-center anchoring discipline: freeze after this many gate-passing GPS
+// fixes (BFMA freezes after 4) or as soon as one fix is this accurate, and
+// ignore re-stamps that move the center less than the minimum (GPS jitter).
+const ZONE_CENTER_FREEZE_FIXES = 4;
+const ZONE_CENTER_FREEZE_ACCURACY_M = 10;
+const ZONE_CENTER_MIN_MOVE_M = 3;
 
 // Best-effort map from a CV detection's free-form `type` to a risk category for
 // the persisted Finding. Defaults to vegetation (the dominant detector class).
@@ -85,6 +95,20 @@ export default function ARViewer() {
   const { isSupported: isXRSupported } = useWebXR();
   const useXR = isXRSupported && mode === 'measurement';
 
+  // Active guideline profile (state-localized) for captured detections — the
+  // assessment's stamped profile when opened from one, composite otherwise.
+  const [guidelineProfile, setGuidelineProfile] = useState(() => guidelineProfileById(undefined));
+  useEffect(() => {
+    if (!assessmentId) return;
+    let cancelled = false;
+    getLocalAssessment(assessmentId).then((assessment) => {
+      if (!cancelled) setGuidelineProfile(guidelineProfileById(assessment?.guidelineProfileId));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [assessmentId]);
+
   // Map-placed annotations for this assessment, shown as geo-anchored 3D markers
   // over the camera (Phase 3). addAnnotation closes the loop for Phase 4 (AR → map).
   const { annotations: geoAnnotations, addAnnotation } = useAnnotations(assessmentId);
@@ -101,18 +125,38 @@ export default function ARViewer() {
   const [arDraftType, setArDraftType] = useState<AnnotationType>('risk-marker');
   const [arDraftRisk, setArDraftRisk] = useState<RiskLevel>('high');
 
-  // Defensible-space zones in AR. Stamp the structure center from the first XR
-  // GPS fix ("stand at the structure"), draw the circle fallback immediately,
-  // then upgrade to the real building footprint (fetched from the Mapbox vector
+  // Defensible-space zones in AR. Stamp the structure center from the GPS fix
+  // ("stand at the structure"), draw the circle fallback immediately, then
+  // upgrade to the real building footprint (fetched from the Mapbox vector
   // tile) so the zones follow the structure outline — same geometry as the map.
-  // TODO: an explicit "set / nudge structure" control to refine the center.
+  // Anchor discipline (mirrors BFMA): keep refining the center while early
+  // fixes improve it, then freeze after enough good fixes (or one excellent
+  // one) so the zones stop crawling with GPS drift for the rest of the session.
+  // The user can override via "Center zones here" (compass path) or "Center
+  // zones at reticle" (XR path) — both freeze the center at their choice.
   const [arZoneCenter, setArZoneCenter] = useState<GeoCoordinates | null>(null);
   const [defensibleZones, setDefensibleZones] = useState<GeoJSON.Feature[]>([]);
+  const zoneCenterFrozenRef = useRef(false);
   useEffect(() => {
-    if (arGeoPose.coords && !arZoneCenter) {
-      setArZoneCenter(arGeoPose.coords);
+    const { coords, accuracy, goodFixCount } = arGeoPose;
+    if (!coords || zoneCenterFrozenRef.current) return;
+    setArZoneCenter((prev) =>
+      !prev || distanceMeters(prev, coords) > ZONE_CENTER_MIN_MOVE_M ? coords : prev
+    );
+    if (goodFixCount >= ZONE_CENTER_FREEZE_FIXES || (accuracy !== null && accuracy <= ZONE_CENTER_FREEZE_ACCURACY_M)) {
+      zoneCenterFrozenRef.current = true;
     }
-  }, [arGeoPose.coords, arZoneCenter]);
+  }, [arGeoPose]);
+
+  // Manual center override — freezes at the user's choice so auto-stamping
+  // never fights them afterwards.
+  const recenterZonesAt = useCallback((coords: GeoCoordinates) => {
+    zoneCenterFrozenRef.current = true;
+    setArZoneCenter(coords);
+  }, []);
+  const recenterZonesHere = useCallback(() => {
+    if (arGeoPose.coords) recenterZonesAt(arGeoPose.coords);
+  }, [arGeoPose.coords, recenterZonesAt]);
   useEffect(() => {
     if (!arZoneCenter) {
       setDefensibleZones([]);
@@ -191,7 +235,11 @@ export default function ARViewer() {
       const target = annotations[index];
       if (!target) return;
 
-      const category = detectedRiskToCategory(target.type);
+      // WUI-detector classes resolve through the typed detection→guideline
+      // map against the active state profile; other backends (DeepLab) keep
+      // the legacy keyword mapping.
+      const guidance = findingContentForDetection(target, guidelineProfile);
+      const category = guidance?.category ?? detectedRiskToCategory(target.type);
       void track('ar_mitigation_identified', {
         type: target.type,
         category,
@@ -206,7 +254,7 @@ export default function ARViewer() {
           category,
           severity: target.severity,
           title: target.type,
-          description: target.description,
+          description: guidance?.description ?? target.description,
         };
         try {
           await addFindingToAssessment(assessmentId, finding);
@@ -221,7 +269,7 @@ export default function ARViewer() {
 
       setDismissed((prev) => new Set(prev).add(riskKey(target)));
     },
-    [annotations, assessmentId]
+    [annotations, assessmentId, guidelineProfile]
   );
 
   const handleClearAll = useCallback(() => {
@@ -252,6 +300,8 @@ export default function ARViewer() {
           onScanState={setXrScanState}
           geoAnnotations={geoAnnotations}
           geoPose={arGeoPose}
+          onPlace={assessmentId ? setPendingArCoords : undefined}
+          onRecenterZones={recenterZonesAt}
           defensibleZones={defensibleZones}
         />
       ) : (
@@ -274,7 +324,23 @@ export default function ARViewer() {
           // Defensible-space zones only in the 3D-model view, not live scan.
           defensibleZones={mode === '3d-model' ? defensibleZones : undefined}
           pose={arGeoPose}
+          onRecenter={recenterZonesHere}
         />
+      )}
+
+      {/* Measurement needs WebXR hit-testing for real distances. The old 2D
+          fallback displayed fabricated pixel-scaled feet, so on unsupported
+          devices (all iOS browsers) we say so instead of guessing. */}
+      {mode === 'measurement' && !isXRSupported && (
+        <div className="absolute inset-x-4 top-20 z-10 flex justify-center pointer-events-none">
+          <div className="max-w-sm px-4 py-3 rounded-lg bg-black/70 backdrop-blur text-white text-sm text-center">
+            <p className="font-medium mb-1">AR measurement isn't available on this device</p>
+            <p className="text-white/70">
+              It needs WebXR, which is currently supported in Chrome on Android. Use a tape
+              measure and drop a marker instead.
+            </p>
+          </div>
+        </div>
       )}
 
       {/* Capture form for an AR-dropped marker (Phase 4) */}
@@ -380,7 +446,7 @@ export default function ARViewer() {
                 ? 'bg-fire-600 text-white'
                 : 'text-white/70 hover:text-white hover:bg-white/10'
             }`}
-            title={isXRSupported ? 'Measurement (AR)' : 'Measurement (2D fallback)'}
+            title={isXRSupported ? 'Measurement (AR)' : 'Measurement (needs WebXR)'}
           >
             <RulerIcon className="w-5 h-5" />
           </button>

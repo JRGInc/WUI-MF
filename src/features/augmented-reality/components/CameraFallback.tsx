@@ -3,7 +3,6 @@ import {
   ArrowPathIcon,
   ExclamationTriangleIcon,
 } from '@heroicons/react/24/outline';
-import { MeasurementTool } from './MeasurementTool';
 
 interface CameraFallbackProps {
   mode: 'camera-overlay' | '3d-model' | 'measurement';
@@ -67,14 +66,6 @@ export function CameraFallback({
         playsInline
         muted
       />
-
-      {mode === 'measurement' && (
-        <MeasurementTool
-          onMeasure={(distance) => {
-            console.log('Measured distance (fallback, pixel-scaled):', distance);
-          }}
-        />
-      )}
 
       {showViewfinder && mode === 'camera-overlay' && (
         <div className="absolute inset-0 pointer-events-none">

@@ -2,7 +2,9 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { MapPinIcon, EyeIcon, EyeSlashIcon } from '@heroicons/react/24/outline';
 import { useGeoPose } from '../hooks/useGeoPose';
-import { geoToEnu, enuToGeo, enuToThree, distanceMeters } from '../utils/geoEnu';
+import { HEADING_TRIM_MAX_DEG, HEADING_TRIM_STEP_DEG, angleDiffDeg } from '../utils/poseFilters';
+import { applyDevicePoseToCamera } from '../utils/deviceOrientationCamera';
+import { geoToEnu, enuToGeo, enuToThree, distanceMeters, bearingDeg } from '../utils/geoEnu';
 import { makeMarkerSprite, disposeMarkerSprite } from '../utils/markerSprite';
 import { zoneOuterRing } from '@/shared/utils/defensibleZones';
 import { RISK_CSS, annotationRisk } from '@/shared/utils/annotationStyle';
@@ -10,9 +12,24 @@ import type { GeoCoordinates, MapAnnotation } from '@/shared/types';
 
 // Defensible-space zone outline colors (match the map + legend).
 const ZONE_COLORS: Record<number, number> = { 0: 0xef4444, 1: 0xf97316, 2: 0xeab308 };
-// Approx handheld phone height — drop the ground plane below the camera so the
-// zone outlines lie on the ground rather than at eye level.
-const ZONE_GROUND_DROP_M = 1.5;
+// Ground plane below the camera. Without depth sensing this path can't detect
+// the ground, so it starts at a typical handheld height and the user nudges it
+// until the bands sit on the ground (persisted; clamped like BFMA's 0.4–3 m).
+const GROUND_DROP_DEFAULT_M = 1.5;
+const GROUND_DROP_MIN_M = 0.5;
+const GROUND_DROP_MAX_M = 3.0;
+const GROUND_DROP_STEP_M = 0.25;
+const GROUND_DROP_STORAGE_KEY = 'ar-ground-drop-m';
+
+function loadGroundDrop(): number {
+  try {
+    const v = Number(localStorage.getItem(GROUND_DROP_STORAGE_KEY));
+    if (Number.isFinite(v) && v >= GROUND_DROP_MIN_M && v <= GROUND_DROP_MAX_M) return v;
+  } catch {
+    // blocked storage — fall through to the default
+  }
+  return GROUND_DROP_DEFAULT_M;
+}
 
 // Top-down radar fill/stroke per zone, and its range (≈100 ft + margin).
 const ZONE_RADAR: Record<number, { fill: string; stroke: string }> = {
@@ -45,7 +62,8 @@ function ringCentroidGeo(ring: number[][]): GeoCoordinates {
 function drawZoneRadar(
   canvas: HTMLCanvasElement | null,
   pose: { coords: GeoCoordinates | null; heading: number | null },
-  zones: GeoJSON.Feature[] | undefined
+  zones: GeoJSON.Feature[] | undefined,
+  target?: GeoCoordinates | null
 ) {
   if (!canvas) return;
   const ctx = canvas.getContext('2d');
@@ -85,6 +103,26 @@ function drawZoneRadar(
     ctx.lineWidth = 1.5;
     ctx.stroke();
   }
+  // wayfinding target: heading-up dot, clamped to the radar rim when beyond range
+  if (target && pose.coords) {
+    const enu = geoToEnu(pose.coords, target);
+    let right = enu.east * cos - enu.north * sin;
+    let fwd = enu.east * sin + enu.north * cos;
+    const d = Math.hypot(right, fwd);
+    const maxR = (c - 8) / scale;
+    if (d > maxR && d > 0) {
+      right *= maxR / d;
+      fwd *= maxR / d;
+    }
+    ctx.fillStyle = '#fb923c';
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(c + right * scale, c - fwd * scale, 4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+  }
+
   // user dot + forward pointer
   ctx.fillStyle = '#ffffff';
   ctx.beginPath();
@@ -99,7 +137,12 @@ function drawZoneRadar(
 }
 
 // How far ahead of the user a dropped marker lands, along the current heading.
-const DROP_AHEAD_M = 10;
+// User-adjustable per drop (this path has no depth, so distance is the one
+// thing the user must supply); the default matches the old fixed behavior.
+const DROP_AHEAD_DEFAULT_M = 10;
+const DROP_AHEAD_MIN_M = 2.5;
+const DROP_AHEAD_MAX_M = 50;
+const DROP_AHEAD_STEP_M = 2.5;
 
 // Tailwind text color for a GPS accuracy reading (metres): green good, amber
 // usable, red rough — so the metres-not-centimetres caveat is visible, not hidden.
@@ -128,6 +171,9 @@ interface GeoMarkerOverlayProps {
   // in (rather than each overlay creating its own useGeoPose) keeps the zone
   // geometry's center and the renderer on the *same* GPS fix.
   pose: ReturnType<typeof useGeoPose>;
+  // Re-stamp the zone center at the user's current position ("stand at the
+  // structure and tap") — the calibration for a bad first fix.
+  onRecenter?: () => void;
 }
 
 interface MarkerObj {
@@ -142,8 +188,10 @@ interface MarkerObj {
  * camera is yawed by the compass heading so markers sit in the real direction.
  *
  * This is the non-XR path (what most phones use). Accuracy is GPS/compass-bound —
- * see the design note. Pitch/roll are not yet applied, so markers ride the
- * horizon line; turning left/right tracks correctly.
+ * see the design note. The pose arrives pre-filtered (accuracy-gated GPS,
+ * low-passed compass, declination + screen-orientation corrected) from
+ * useGeoPose, and full yaw/pitch/roll is applied via the standard
+ * device-orientation quaternion.
  */
 export function GeoMarkerOverlay({
   annotations,
@@ -151,6 +199,7 @@ export function GeoMarkerOverlay({
   onPlace,
   defensibleZones,
   pose,
+  onRecenter,
 }: GeoMarkerOverlayProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -176,6 +225,26 @@ export function GeoMarkerOverlay({
 
   const [enabled, setEnabled] = useState(false);
   const [showZones, setShowZones] = useState(true);
+  // User-calibrated ground height (metres below the camera); ref-mirrored for
+  // the render loop, persisted across sessions.
+  const [groundDrop, setGroundDrop] = useState(loadGroundDrop);
+  const groundDropRef = useRef(groundDrop);
+  groundDropRef.current = groundDrop;
+
+  const nudgeGround = (deltaM: number) => {
+    setGroundDrop((prev) => {
+      const next = Math.min(
+        GROUND_DROP_MAX_M,
+        Math.max(GROUND_DROP_MIN_M, Math.round((prev + deltaM) / GROUND_DROP_STEP_M) * GROUND_DROP_STEP_M)
+      );
+      try {
+        localStorage.setItem(GROUND_DROP_STORAGE_KEY, String(next));
+      } catch {
+        // blocked storage — the nudge still applies this session
+      }
+      return next;
+    });
+  };
 
   // Toggle the on-ground filled zones with the show/hide control.
   useEffect(() => {
@@ -311,17 +380,18 @@ export function GeoMarkerOverlay({
       const renderer = rendererRef.current;
       const scene = sceneRef.current;
       const camera = cameraRef.current;
-      const { coords, heading, beta, gamma } = poseRef.current;
+      const { coords, heading, beta, gamma, screenAngle } = poseRef.current;
 
       if (renderer && scene && camera) {
-        // Orient the camera from the device pose (rotation order YXZ = yaw→pitch→roll):
-        //  - yaw from the compass heading (0 = north → look down −Z),
-        //  - pitch from beta (90° = upright at the horizon),
-        //  - roll from gamma.
-        // Signs are the common portrait mapping; calibrate per device if inverted.
-        if (heading !== null) camera.rotation.y = -THREE.MathUtils.degToRad(heading);
-        if (beta !== null) camera.rotation.x = THREE.MathUtils.degToRad(beta - 90);
-        if (gamma !== null) camera.rotation.z = THREE.MathUtils.degToRad(-gamma);
+        // Orient the camera from the (filtered) device pose using the standard
+        // W3C quaternion mapping — valid in any screen orientation, unlike the
+        // previous portrait-only per-axis Euler assignment.
+        if (heading !== null && beta !== null && gamma !== null) {
+          applyDevicePoseToCamera(camera, heading, beta, gamma, screenAngle);
+        } else if (heading !== null) {
+          // Compass only (no tilt yet): yaw toward the heading at the horizon.
+          camera.rotation.set(0, -THREE.MathUtils.degToRad(heading), 0);
+        }
 
         if (coords) {
           for (const { sprite, annotation } of markersRef.current) {
@@ -340,7 +410,7 @@ export function GeoMarkerOverlay({
           const origin = zoneOriginRef.current;
           if (zGroup && origin) {
             const enu = geoToEnu(coords, origin);
-            const p = enuToThree({ east: enu.east, north: enu.north, up: -ZONE_GROUND_DROP_M }, 0);
+            const p = enuToThree({ east: enu.east, north: enu.north, up: -groundDropRef.current }, 0);
             zGroup.position.set(p.x, p.y, p.z);
           }
         }
@@ -362,22 +432,29 @@ export function GeoMarkerOverlay({
     if (!enabled) return;
     let raf = 0;
     const draw = () => {
-      drawZoneRadar(radarRef.current, poseRef.current, zonesPropRef.current);
+      drawZoneRadar(radarRef.current, poseRef.current, zonesPropRef.current, targetCoordsRef.current);
       raf = requestAnimationFrame(draw);
     };
     raf = requestAnimationFrame(draw);
     return () => cancelAnimationFrame(raf);
   }, [enabled]);
 
-  // Drop a marker ahead of the user along the current heading (Phase 4). With no
-  // compass we fall back to the user's exact GPS position.
+  // Drop a marker ahead of the user along the current heading (Phase 4). The
+  // distance is user-adjustable; with no compass we fall back to the user's
+  // exact GPS position.
+  const [dropAhead, setDropAhead] = useState(DROP_AHEAD_DEFAULT_M);
+  const nudgeDropAhead = (deltaM: number) => {
+    setDropAhead((prev) =>
+      Math.min(DROP_AHEAD_MAX_M, Math.max(DROP_AHEAD_MIN_M, prev + deltaM))
+    );
+  };
   const handleDrop = () => {
     const { coords, heading } = poseRef.current;
     if (!coords) return;
     let placed: GeoCoordinates = coords;
     if (heading !== null) {
       const h = THREE.MathUtils.degToRad(heading);
-      placed = enuToGeo(coords, Math.sin(h) * DROP_AHEAD_M, Math.cos(h) * DROP_AHEAD_M);
+      placed = enuToGeo(coords, Math.sin(h) * dropAhead, Math.cos(h) * dropAhead);
     }
     onPlace?.(placed);
   };
@@ -389,6 +466,39 @@ export function GeoMarkerOverlay({
       .map((a) => ({ a, dist: distanceMeters(pose.coords!, a.coordinates) }))
       .sort((x, y) => x.dist - y.dist);
   }, [annotations, pose.coords]);
+
+  // Wayfinding target: tap a marker chip to navigate to it. The pointer chip
+  // shows the relative bearing (rotating arrow) + live distance; the radar
+  // draws the target as a dot (rim-clamped when out of range).
+  const [targetId, setTargetId] = useState<string | null>(null);
+  const target = useMemo(
+    () => (targetId ? annotations.find((a) => a.id === targetId) ?? null : null),
+    [annotations, targetId]
+  );
+  useEffect(() => {
+    if (targetId && !annotations.some((a) => a.id === targetId)) setTargetId(null);
+  }, [annotations, targetId]);
+  const targetCoordsRef = useRef<GeoCoordinates | null>(null);
+  targetCoordsRef.current = target?.coordinates ?? null;
+
+  // Relative bearing (degrees, + = clockwise/right) and distance to the target.
+  const targetNav = useMemo(() => {
+    if (!target || !pose.coords) return null;
+    const dist = distanceMeters(pose.coords, target.coordinates);
+    const rel =
+      pose.heading !== null
+        ? angleDiffDeg(bearingDeg(pose.coords, target.coordinates), pose.heading)
+        : null;
+    return { dist, rel };
+  }, [target, pose.coords, pose.heading]);
+
+  // Chips: the target stays pinned first even when it falls out of the top 4.
+  const displayChips = useMemo(() => {
+    if (!targetId) return ranked.slice(0, 4);
+    const t = ranked.find((r) => r.a.id === targetId);
+    const rest = ranked.filter((r) => r.a.id !== targetId).slice(0, 3);
+    return t ? [t, ...rest] : rest;
+  }, [ranked, targetId]);
 
   // NOTE: always render the container + canvas (even when inactive) so the
   // three.js scene sets up on mount. Returning null while the camera warms up
@@ -436,14 +546,84 @@ export function GeoMarkerOverlay({
       {/* Show/hide defensible space (ground fills + radar). Sits below the AR
           mode selector (top-4 left) so it isn't covered by it. Only shown when
           zones are supplied (i.e. the 3D-model mode, not live scan). */}
-      {active && enabled && (defensibleZones?.length ?? 0) > 0 && (
-        <button
-          onClick={() => setShowZones((v) => !v)}
-          className="absolute top-20 left-4 z-10 pointer-events-auto flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-black/55 backdrop-blur text-white text-xs font-medium shadow-lg"
-        >
-          {showZones ? <EyeIcon className="w-4 h-4" /> : <EyeSlashIcon className="w-4 h-4" />}
-          Defensible space
-        </button>
+      {active && enabled && (
+        <div className="absolute top-20 left-4 z-10 flex flex-col gap-1.5">
+          {(defensibleZones?.length ?? 0) > 0 && (
+            <button
+              onClick={() => setShowZones((v) => !v)}
+              className="pointer-events-auto flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-black/55 backdrop-blur text-white text-xs font-medium shadow-lg"
+            >
+              {showZones ? <EyeIcon className="w-4 h-4" /> : <EyeSlashIcon className="w-4 h-4" />}
+              Defensible space
+            </button>
+          )}
+
+          {/* Ground-height calibration: nudge the ground plane until the zone
+              bands sit on the real ground (no depth sensing on this path). */}
+          {(defensibleZones?.length ?? 0) > 0 && showZones && (
+            <div className="pointer-events-auto flex items-center gap-1 px-2 py-1 rounded-lg bg-black/55 backdrop-blur text-white text-xs shadow-lg">
+              <span className="pr-1">Ground {groundDrop.toFixed(2).replace(/\.?0+$/, '')}m</span>
+              <button
+                onClick={() => nudgeGround(-GROUND_DROP_STEP_M)}
+                disabled={groundDrop <= GROUND_DROP_MIN_M}
+                className="px-1.5 py-0.5 rounded bg-white/10 hover:bg-white/20 disabled:opacity-40 font-mono"
+                title="Raise the ground plane"
+                aria-label="Raise the ground plane"
+              >
+                ▲
+              </button>
+              <button
+                onClick={() => nudgeGround(GROUND_DROP_STEP_M)}
+                disabled={groundDrop >= GROUND_DROP_MAX_M}
+                className="px-1.5 py-0.5 rounded bg-white/10 hover:bg-white/20 disabled:opacity-40 font-mono"
+                title="Lower the ground plane"
+                aria-label="Lower the ground plane"
+              >
+                ▼
+              </button>
+            </div>
+          )}
+
+          {/* North calibration: rotate the AR world in small steps until
+              markers/zones line up with reality (persisted per device —
+              corrects residual compass bias beyond automatic declination). */}
+          {pose.heading !== null && (
+            <div className="pointer-events-auto flex items-center gap-1 px-2 py-1 rounded-lg bg-black/55 backdrop-blur text-white text-xs shadow-lg">
+              <span className="pr-1">
+                North{pose.headingTrim !== 0 ? ` ${pose.headingTrim > 0 ? '+' : ''}${pose.headingTrim}°` : ''}
+              </span>
+              <button
+                onClick={() => pose.adjustHeadingTrim(-HEADING_TRIM_STEP_DEG)}
+                disabled={pose.headingTrim <= -HEADING_TRIM_MAX_DEG}
+                className="px-1.5 py-0.5 rounded bg-white/10 hover:bg-white/20 disabled:opacity-40 font-mono"
+                title="Rotate AR content counter-clockwise"
+                aria-label="Rotate AR content counter-clockwise"
+              >
+                ◀
+              </button>
+              <button
+                onClick={() => pose.adjustHeadingTrim(HEADING_TRIM_STEP_DEG)}
+                disabled={pose.headingTrim >= HEADING_TRIM_MAX_DEG}
+                className="px-1.5 py-0.5 rounded bg-white/10 hover:bg-white/20 disabled:opacity-40 font-mono"
+                title="Rotate AR content clockwise"
+                aria-label="Rotate AR content clockwise"
+              >
+                ▶
+              </button>
+            </div>
+          )}
+
+          {/* Re-stamp the zone center at the user's position ("stand at the
+              structure"). Closes the long-standing set/nudge-center TODO. */}
+          {(defensibleZones?.length ?? 0) > 0 && showZones && onRecenter && pose.coords && (
+            <button
+              onClick={onRecenter}
+              className="pointer-events-auto px-2.5 py-1.5 rounded-lg bg-black/55 backdrop-blur text-white text-xs font-medium shadow-lg text-left"
+            >
+              Center zones here
+            </button>
+          )}
+        </div>
       )}
 
       {/* Top-down zone radar — always-visible view of the zones around you,
@@ -458,31 +638,85 @@ export function GeoMarkerOverlay({
         />
       )}
 
-      {/* Drop a marker ahead (Phase 4: AR → map) */}
+      {/* Drop a marker ahead (Phase 4: AR → map), at a user-chosen distance. */}
       {enabled && onPlace && pose.coords && (
+        <div className="absolute bottom-20 left-1/2 -translate-x-1/2 pointer-events-auto flex items-center gap-1.5">
+          <button
+            onClick={() => nudgeDropAhead(-DROP_AHEAD_STEP_M)}
+            disabled={dropAhead <= DROP_AHEAD_MIN_M}
+            className="px-2.5 py-2.5 rounded-full bg-black/55 backdrop-blur text-white text-sm font-semibold shadow-lg disabled:opacity-40"
+            title="Drop closer"
+            aria-label="Decrease drop distance"
+          >
+            −
+          </button>
+          <button
+            onClick={handleDrop}
+            className="flex items-center gap-2 px-4 py-2.5 rounded-full bg-fire-600 text-white text-sm font-semibold shadow-lg"
+          >
+            <MapPinIcon className="w-4 h-4" />
+            Drop marker {dropAhead % 1 === 0 ? dropAhead : dropAhead.toFixed(1)}m ahead
+          </button>
+          <button
+            onClick={() => nudgeDropAhead(DROP_AHEAD_STEP_M)}
+            disabled={dropAhead >= DROP_AHEAD_MAX_M}
+            className="px-2.5 py-2.5 rounded-full bg-black/55 backdrop-blur text-white text-sm font-semibold shadow-lg disabled:opacity-40"
+            title="Drop farther"
+            aria-label="Increase drop distance"
+          >
+            +
+          </button>
+        </div>
+      )}
+
+      {/* Wayfinding pointer: rotating bearing arrow + live distance to the
+          selected marker. Pitch-independent, like the radar. Tap to clear. */}
+      {enabled && target && targetNav && (
         <button
-          onClick={handleDrop}
-          className="absolute bottom-20 left-1/2 -translate-x-1/2 pointer-events-auto flex items-center gap-2 px-4 py-2.5 rounded-full bg-fire-600 text-white text-sm font-semibold shadow-lg"
+          onClick={() => setTargetId(null)}
+          className="absolute top-28 left-1/2 -translate-x-1/2 z-10 pointer-events-auto flex items-center gap-2 px-3 py-1.5 rounded-full bg-black/70 backdrop-blur text-white text-xs shadow-lg"
+          title="Tap to stop navigating"
         >
-          <MapPinIcon className="w-4 h-4" />
-          Drop marker {DROP_AHEAD_M}m ahead
+          {targetNav.rel !== null ? (
+            <svg
+              viewBox="0 0 24 24"
+              className="w-4 h-4 text-fire-500"
+              style={{ transform: `rotate(${Math.round(targetNav.rel)}deg)` }}
+              fill="currentColor"
+              aria-hidden="true"
+            >
+              <path d="M12 2 L18 20 L12 16 L6 20 Z" />
+            </svg>
+          ) : (
+            <span className="text-white/60">no compass ·</span>
+          )}
+          <span className="font-medium">{target.content.title}</span>
+          <span className="text-white/70 tabular-nums">
+            {targetNav.dist < 1000
+              ? `${Math.round(targetNav.dist)}m`
+              : `${(targetNav.dist / 1000).toFixed(1)}km`}
+            {targetNav.rel !== null && Math.abs(targetNav.rel) <= 20 ? ' · ahead' : ''}
+          </span>
         </button>
       )}
 
-      {/* Nearest-markers HUD */}
-      {enabled && ranked.length > 0 && (
+      {/* Nearest-markers HUD — tap a chip to navigate to that marker. */}
+      {enabled && displayChips.length > 0 && (
         <div className="absolute bottom-4 left-4 right-4 flex gap-2 overflow-x-auto pointer-events-none">
-          {ranked.slice(0, 4).map(({ a, dist }) => (
-            <div
+          {displayChips.map(({ a, dist }) => (
+            <button
               key={a.id}
-              className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-black/55 backdrop-blur text-white text-xs whitespace-nowrap"
+              onClick={() => setTargetId((prev) => (prev === a.id ? null : a.id))}
+              className={`pointer-events-auto flex items-center gap-2 px-2.5 py-1.5 rounded-lg backdrop-blur text-white text-xs whitespace-nowrap ${
+                a.id === targetId ? 'bg-fire-600' : 'bg-black/55'
+              }`}
             >
               <span
                 className="w-2.5 h-2.5 rounded-full"
                 style={{ background: RISK_CSS[annotationRisk(a.content)] }}
               />
               {a.content.title} · {dist < 1000 ? `${Math.round(dist)}m` : `${(dist / 1000).toFixed(1)}km`}
-            </div>
+            </button>
           ))}
         </div>
       )}

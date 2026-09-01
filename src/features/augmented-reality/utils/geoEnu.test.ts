@@ -5,6 +5,7 @@ import {
   enuToThree,
   threeToEnu,
   distanceMeters,
+  bearingDeg,
 } from './geoEnu';
 import type { GeoCoordinates } from '@/shared/types';
 
@@ -83,5 +84,20 @@ describe('geoEnu', () => {
 
     expect(geoBack.latitude).toBeCloseTo(annotation.latitude, 6);
     expect(geoBack.longitude).toBeCloseTo(annotation.longitude, 6);
+  });
+});
+
+describe('bearingDeg', () => {
+  const origin = { latitude: 43.6153, longitude: -116.2015 };
+
+  it('returns compass bearings for the cardinal directions', () => {
+    expect(bearingDeg(origin, enuToGeo(origin, 0, 100))).toBeCloseTo(0, 5); // north
+    expect(bearingDeg(origin, enuToGeo(origin, 100, 0))).toBeCloseTo(90, 5); // east
+    expect(bearingDeg(origin, enuToGeo(origin, 0, -100))).toBeCloseTo(180, 5); // south
+    expect(bearingDeg(origin, enuToGeo(origin, -100, 0))).toBeCloseTo(270, 5); // west
+  });
+
+  it('handles diagonals', () => {
+    expect(bearingDeg(origin, enuToGeo(origin, 100, 100))).toBeCloseTo(45, 3);
   });
 });

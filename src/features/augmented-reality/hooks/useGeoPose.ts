@@ -1,5 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { GeoCoordinates } from '@/shared/types';
+import {
+  AngleSmoother,
+  GpsFilter,
+  HeadingFilter,
+  clampHeadingTrim,
+  fixToCoords,
+  getScreenAngle,
+  loadHeadingTrim,
+  magneticDeclination,
+  normalizeDeg,
+  saveHeadingTrim,
+} from '../utils/poseFilters';
 
 /**
  * Device geo-pose for location-based AR: where the phone is (GPS) and which way
@@ -7,21 +19,40 @@ import type { GeoCoordinates } from '@/shared/types';
  * geoEnu turns an annotation's lat/lng into a local position only once we know
  * the user's position and heading.
  *
- * Heading is degrees clockwise from true north. iOS exposes it directly via
- * `webkitCompassHeading`; elsewhere we derive it from `deviceorientationabsolute`
- * `alpha`. iOS also gates orientation behind a user-gesture permission, so call
- * `requestPermission()` from a tap before relying on heading.
+ * Raw sensor values are filtered before they reach consumers (see poseFilters):
+ * GPS fixes are accuracy-gated and blended, the compass is warm-up-averaged and
+ * low-passed, and heading is corrected for magnetic declination and the screen
+ * orientation angle. `heading` is therefore the true-north direction of the
+ * camera view, valid in any screen orientation.
+ *
+ * Both compass sources are magnetic-north referenced — iOS exposes
+ * `webkitCompassHeading` (magnetic, per Apple's docs), elsewhere we derive from
+ * `deviceorientationabsolute` `alpha`. iOS also gates orientation behind a
+ * user-gesture permission, so call `requestPermission()` from a tap before
+ * relying on heading.
  */
 
 export interface GeoPose {
-  coords: GeoCoordinates | null;
-  accuracy: number | null; // GPS horizontal accuracy, metres
-  heading: number | null; // degrees from true north, clockwise
+  coords: GeoCoordinates | null; // filtered position
+  accuracy: number | null; // GPS horizontal accuracy of the latest raw fix, metres
+  heading: number | null; // smoothed true-north view heading, degrees clockwise
   headingAccuracy: number | null;
-  // Device tilt for AR pitch/roll. beta ≈ 90° when the phone is held upright
-  // facing the horizon; gamma is left/right roll. Both in degrees.
+  // Smoothed device tilt for AR pitch/roll. beta ≈ 90° when the phone is held
+  // upright facing the horizon; gamma is left/right roll. Both in degrees.
   beta: number | null;
   gamma: number | null;
+  // Screen orientation angle (0 portrait / 90 / 180 / 270) the heading was
+  // corrected with — camera math needs it to reconstruct device-frame angles.
+  screenAngle: number;
+  // Magnetic declination applied to heading (east-positive), null until the
+  // model resolves (heading is magnetic-referenced in the meantime).
+  declination: number | null;
+  // User-dialed compass-bias correction (degrees, persisted per device),
+  // already folded into `heading`.
+  headingTrim: number;
+  // Accepted GPS fixes at or under the accuracy gate — consumers use this to
+  // decide when a geo anchor is trustworthy enough to freeze.
+  goodFixCount: number;
   permission: 'unknown' | 'granted' | 'denied' | 'unsupported';
   error: string | null;
 }
@@ -43,29 +74,73 @@ export function useGeoPose(enabled: boolean) {
     headingAccuracy: null,
     beta: null,
     gamma: null,
+    screenAngle: 0,
+    declination: null,
+    headingTrim: loadHeadingTrim(),
+    goodFixCount: 0,
     permission: 'unknown',
     error: null,
   });
 
   const watchIdRef = useRef<number | null>(null);
+  const gpsFilterRef = useRef(new GpsFilter());
+  const headingFilterRef = useRef(new HeadingFilter());
+  const betaSmootherRef = useRef(new AngleSmoother());
+  const gammaSmootherRef = useRef(new AngleSmoother());
+  // Once absolute orientation events flow, plain (non-absolute) events are
+  // ignored entirely — previously both listeners wrote beta/gamma and the
+  // relative event could overwrite the absolute one (last-writer-wins).
+  const hasAbsoluteRef = useRef(false);
+  const declinationRef = useRef<number | null>(null);
+  const headingTrimRef = useRef(loadHeadingTrim());
+
+  // Adjust the per-device compass-bias trim (relative delta, clamped ±30°,
+  // persisted). The next orientation events pick it up via the ref; the
+  // adaptive heading filter converges on small steps in a few frames.
+  const adjustHeadingTrim = useCallback((deltaDeg: number) => {
+    const next = clampHeadingTrim(headingTrimRef.current + deltaDeg);
+    headingTrimRef.current = next;
+    saveHeadingTrim(next);
+    setPose((prev) => ({ ...prev, headingTrim: next }));
+  }, []);
 
   // --- orientation handler (shared by both event names) ---
   const handleOrientation = useCallback((event: DeviceOrientationEvent) => {
     const e = event as OrientationEventIOS;
-    let heading: number | null = null;
-    let headingAccuracy: number | null = null;
+    const isIOS = typeof e.webkitCompassHeading === 'number';
 
-    if (typeof e.webkitCompassHeading === 'number') {
-      // iOS: already degrees clockwise from true north.
-      heading = e.webkitCompassHeading;
+    if (e.type === 'deviceorientationabsolute' && typeof e.alpha === 'number') {
+      hasAbsoluteRef.current = true;
+    } else if (e.type === 'deviceorientation' && hasAbsoluteRef.current && !isIOS) {
+      return; // absolute source is active; drop the relative duplicate
+    }
+
+    // Magnetic heading of the device top, degrees clockwise from magnetic north.
+    let magHeading: number | null = null;
+    let headingAccuracy: number | null = null;
+    if (isIOS) {
+      magHeading = e.webkitCompassHeading!;
       headingAccuracy = e.webkitCompassAccuracy ?? null;
     } else if (typeof e.alpha === 'number' && e.absolute) {
       // Spec: alpha is degrees counter-clockwise from north → convert.
-      heading = (360 - e.alpha) % 360;
+      magHeading = (360 - e.alpha) % 360;
     }
 
-    const beta = typeof e.beta === 'number' ? e.beta : null;
-    const gamma = typeof e.gamma === 'number' ? e.gamma : null;
+    const screenAngle = getScreenAngle();
+    let heading: number | null = null;
+    if (magHeading !== null) {
+      // True view heading: magnetic + declination + user trim, rotated into
+      // the screen frame. Filtered in this (view) domain so a physical screen
+      // rotation — where raw device heading and screen angle change together
+      // but the view doesn't — stays continuous through the filter.
+      const viewRaw = normalizeDeg(
+        magHeading + (declinationRef.current ?? 0) + headingTrimRef.current + screenAngle
+      );
+      heading = headingFilterRef.current.push(viewRaw);
+    }
+
+    const beta = typeof e.beta === 'number' ? betaSmootherRef.current.push(e.beta) : null;
+    const gamma = typeof e.gamma === 'number' ? gammaSmootherRef.current.push(e.gamma) : null;
 
     setPose((prev) => ({
       ...prev,
@@ -73,6 +148,8 @@ export function useGeoPose(enabled: boolean) {
       headingAccuracy: heading !== null ? headingAccuracy : prev.headingAccuracy,
       beta: beta ?? prev.beta,
       gamma: gamma ?? prev.gamma,
+      screenAngle,
+      declination: declinationRef.current,
     }));
   }, []);
 
@@ -105,24 +182,49 @@ export function useGeoPose(enabled: boolean) {
       return;
     }
 
+    let cancelled = false;
+
     watchIdRef.current = navigator.geolocation.watchPosition(
       (position) => {
-        setPose((prev) => ({
-          ...prev,
-          coords: {
+        const filtered = gpsFilterRef.current.push(
+          {
             latitude: position.coords.latitude,
             longitude: position.coords.longitude,
             altitude: position.coords.altitude ?? undefined,
+            accuracy: position.coords.accuracy,
           },
+          position.timestamp
+        );
+
+        if (!filtered) {
+          // Rejected by the gate/throttle — still surface the raw accuracy so
+          // the HUD chip reflects real signal quality, not the last good fix.
+          setPose((prev) => ({ ...prev, accuracy: position.coords.accuracy, error: null }));
+          return;
+        }
+
+        setPose((prev) => ({
+          ...prev,
+          coords: fixToCoords(filtered),
           accuracy: position.coords.accuracy,
+          goodFixCount: gpsFilterRef.current.goodFixCount,
           error: null,
         }));
+
+        // Resolve declination once we know roughly where we are (cached by
+        // distance inside magneticDeclination; cheap to call per accept).
+        magneticDeclination(filtered.latitude, filtered.longitude).then((decl) => {
+          if (cancelled || decl === null || decl === declinationRef.current) return;
+          declinationRef.current = decl;
+          setPose((prev) => ({ ...prev, declination: decl }));
+        });
       },
       (err) => setPose((prev) => ({ ...prev, error: err.message })),
       { enableHighAccuracy: true, maximumAge: 1000, timeout: 15000 }
     );
 
     return () => {
+      cancelled = true;
       if (watchIdRef.current !== null) {
         navigator.geolocation.clearWatch(watchIdRef.current);
         watchIdRef.current = null;
@@ -133,7 +235,8 @@ export function useGeoPose(enabled: boolean) {
   // --- orientation listeners ---
   useEffect(() => {
     if (!enabled) return;
-    // Prefer the absolute variant (true north); fall back to the plain event.
+    // Prefer the absolute variant (magnetic-north referenced); the plain event
+    // is the fallback and is ignored once absolute events are observed.
     window.addEventListener('deviceorientationabsolute', handleOrientation as EventListener);
     window.addEventListener('deviceorientation', handleOrientation as EventListener);
     return () => {
@@ -142,5 +245,5 @@ export function useGeoPose(enabled: boolean) {
     };
   }, [enabled, handleOrientation]);
 
-  return { ...pose, requestPermission };
+  return { ...pose, requestPermission, adjustHeadingTrim };
 }

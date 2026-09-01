@@ -1,114 +1,111 @@
-import { useState, useCallback } from 'react';
+import { useCallback, useState } from 'react';
 
-interface Point3D {
+/**
+ * Two-point AR tape measure (WebXR path). Every select while in measurement
+ * mode places a point: the first becomes the pending start, the second
+ * completes a segment. Distances are stored canonically in metres and
+ * formatted per the display unit, so toggling units never mutates data.
+ *
+ * The previous version gated addPoint behind a startMeasurement() call that
+ * no UI ever made, so it could never produce a measurement.
+ *
+ * The state transition (addPointTo) is a pure exported function so the
+ * point-pairing logic is unit-testable without a DOM.
+ */
+
+export interface MeasurePoint {
   x: number;
   y: number;
   z: number;
 }
 
-interface Measurement {
+export interface Measurement {
   id: string;
-  start: Point3D;
-  end: Point3D;
-  distance: number;
-  unit: 'feet' | 'meters';
+  start: MeasurePoint;
+  end: MeasurePoint;
+  distanceM: number;
+}
+
+export interface MeasureState {
+  pendingPoint: MeasurePoint | null;
+  measurements: Measurement[];
+}
+
+export type MeasureUnit = 'feet' | 'meters';
+
+const UNIT_STORAGE_KEY = 'ar-measure-unit';
+const M_TO_FT = 3.28084;
+
+export const EMPTY_MEASURE_STATE: MeasureState = { pendingPoint: null, measurements: [] };
+
+/** Pure transition: first point becomes pending, second completes a segment. */
+export function addPointTo(state: MeasureState, point: MeasurePoint): MeasureState {
+  if (!state.pendingPoint) {
+    return { ...state, pendingPoint: point };
+  }
+  return {
+    pendingPoint: null,
+    measurements: [
+      ...state.measurements,
+      {
+        id: `${Date.now()}-${state.measurements.length}`,
+        start: state.pendingPoint,
+        end: point,
+        distanceM: pointDistance(state.pendingPoint, point),
+      },
+    ],
+  };
+}
+
+export function pointDistance(a: MeasurePoint, b: MeasurePoint): number {
+  return Math.hypot(b.x - a.x, b.y - a.y, b.z - a.z);
+}
+
+export function formatDistance(distanceM: number, unit: MeasureUnit): string {
+  return unit === 'feet' ? `${(distanceM * M_TO_FT).toFixed(1)} ft` : `${distanceM.toFixed(2)} m`;
+}
+
+function loadUnit(): MeasureUnit {
+  try {
+    return localStorage.getItem(UNIT_STORAGE_KEY) === 'meters' ? 'meters' : 'feet';
+  } catch {
+    return 'feet'; // defensible-space rules are written in feet
+  }
 }
 
 export function useARMeasurement() {
-  const [isActive, setIsActive] = useState(false);
-  const [points, setPoints] = useState<Point3D[]>([]);
-  const [measurements, setMeasurements] = useState<Measurement[]>([]);
-  const [unit, setUnit] = useState<'feet' | 'meters'>('feet');
+  const [state, setState] = useState<MeasureState>(EMPTY_MEASURE_STATE);
+  const [unit, setUnit] = useState<MeasureUnit>(loadUnit);
 
-  const startMeasurement = useCallback(() => {
-    setIsActive(true);
-    setPoints([]);
+  const addPoint = useCallback((point: MeasurePoint) => {
+    setState((prev) => addPointTo(prev, point));
   }, []);
 
-  const addPoint = useCallback(
-    (point: Point3D) => {
-      if (!isActive) return;
-
-      setPoints((prev) => {
-        const newPoints = [...prev, point];
-
-        // If we have two points, calculate the distance
-        if (newPoints.length === 2) {
-          const [start, end] = newPoints;
-          const distanceMeters = calculateDistance(start, end);
-          const distance = unit === 'feet' ? distanceMeters * 3.28084 : distanceMeters;
-
-          const measurement: Measurement = {
-            id: `${Date.now()}`,
-            start,
-            end,
-            distance,
-            unit,
-          };
-
-          setMeasurements((prev) => [...prev, measurement]);
-          setIsActive(false);
-          return [];
-        }
-
-        return newPoints;
-      });
-    },
-    [isActive, unit]
-  );
-
-  const getMeasurement = useCallback(() => {
-    if (measurements.length === 0) return null;
-    return measurements[measurements.length - 1];
-  }, [measurements]);
-
-  const clearMeasurement = useCallback(() => {
-    setPoints([]);
-    setMeasurements([]);
-    setIsActive(false);
-  }, []);
-
-  const deleteMeasurement = useCallback((id: string) => {
-    setMeasurements((prev) => prev.filter((m) => m.id !== id));
+  const clearAll = useCallback(() => {
+    setState(EMPTY_MEASURE_STATE);
   }, []);
 
   const toggleUnit = useCallback(() => {
     setUnit((prev) => {
-      const newUnit = prev === 'feet' ? 'meters' : 'feet';
-
-      // Convert existing measurements
-      setMeasurements((measurements) =>
-        measurements.map((m) => ({
-          ...m,
-          distance:
-            newUnit === 'feet'
-              ? m.distance * (m.unit === 'meters' ? 3.28084 : 1)
-              : m.distance * (m.unit === 'feet' ? 0.3048 : 1),
-          unit: newUnit,
-        }))
-      );
-
-      return newUnit;
+      const next: MeasureUnit = prev === 'feet' ? 'meters' : 'feet';
+      try {
+        localStorage.setItem(UNIT_STORAGE_KEY, next);
+      } catch {
+        // Private browsing / blocked storage — the toggle still works this session.
+      }
+      return next;
     });
   }, []);
 
-  return {
-    isActive,
-    points,
-    measurements,
-    unit,
-    startMeasurement,
-    addPoint,
-    getMeasurement,
-    clearMeasurement,
-    deleteMeasurement,
-    toggleUnit,
-  };
-}
+  const format = useCallback((distanceM: number) => formatDistance(distanceM, unit), [unit]);
 
-function calculateDistance(p1: Point3D, p2: Point3D): number {
-  const dx = p2.x - p1.x;
-  const dy = p2.y - p1.y;
-  const dz = p2.z - p1.z;
-  return Math.sqrt(dx * dx + dy * dy + dz * dz);
+  return {
+    pendingPoint: state.pendingPoint,
+    measurements: state.measurements,
+    unit,
+    addPoint,
+    clearAll,
+    toggleUnit,
+    format,
+  };
 }

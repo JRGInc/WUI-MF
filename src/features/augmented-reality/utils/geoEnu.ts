@@ -86,3 +86,9 @@ export function distanceMeters(a: GeoCoordinates, b: GeoCoordinates): number {
   const { east, north } = geoToEnu(a, b);
   return Math.hypot(east, north);
 }
+
+/** Compass bearing (degrees clockwise from north) from `from` to `to`. */
+export function bearingDeg(from: GeoCoordinates, to: GeoCoordinates): number {
+  const { east, north } = geoToEnu(from, to);
+  return ((Math.atan2(east, north) * 180) / Math.PI + 360) % 360;
+}
