@@ -29,8 +29,8 @@ export default function Register() {
 
     try {
       await signUp(email, password, fullName);
-      showSuccessToast('Account created', 'Please check your email to verify your account.');
-      navigate('/login');
+      showSuccessToast('Account created', 'Welcome! You are now signed in.');
+      navigate('/', { replace: true });
     } catch (error) {
       console.error('Registration error:', error);
       showErrorToast('Registration failed', 'Please try again with a different email.');

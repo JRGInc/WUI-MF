@@ -85,7 +85,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setSession(MOCK_SESSION);
       return;
     }
-    const { error } = await supabase.auth.signUp({
+    const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: {
@@ -95,6 +95,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       },
     });
     if (error) throw error;
+
+    // Email confirmation is disabled on the Supabase project (autoconfirm),
+    // so a successful signup always returns a live session. When the email is
+    // already registered, Supabase returns an obfuscated user with no session
+    // instead of an error — surface that as a failure.
+    if (!data.session) {
+      throw new Error('An account with this email may already exist.');
+    }
 
     // The profile row is created server-side by the handle_new_user() trigger
     // (after insert on auth.users) — see supabase/migrations. No client insert
