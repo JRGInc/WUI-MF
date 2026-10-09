@@ -186,6 +186,59 @@ export interface Database {
           created_at?: string;
         };
       };
+      mitigation_actions: {
+        Row: {
+          id: string;
+          assessment_id: string;
+          recommendation_id: string;
+          category: string;
+          priority: string | null;
+          title: string;
+          status: string;
+          notes: string | null;
+          evidence_photo_ids: string[];
+          completed_at: string | null;
+          verified_at: string | null;
+          verified_by: string | null;
+          created_by: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id: string;
+          assessment_id: string;
+          recommendation_id: string;
+          category: string;
+          priority?: string | null;
+          title: string;
+          status: string;
+          notes?: string | null;
+          evidence_photo_ids?: string[];
+          completed_at?: string | null;
+          verified_at?: string | null;
+          verified_by?: string | null;
+          created_by?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          assessment_id?: string;
+          recommendation_id?: string;
+          category?: string;
+          priority?: string | null;
+          title?: string;
+          status?: string;
+          notes?: string | null;
+          evidence_photo_ids?: string[];
+          completed_at?: string | null;
+          verified_at?: string | null;
+          verified_by?: string | null;
+          created_by?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+      };
       training_progress: {
         Row: {
           id: string;
