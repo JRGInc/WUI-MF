@@ -72,6 +72,30 @@ export interface Recommendation {
   resources?: ResourceLink[];
 }
 
+// Mitigation tracking — progress on acting on a Recommendation. One record per
+// (assessment, recommendation); absence of a record means "not started".
+// 'verified' is set only by a third party (inspector/agency), never by the
+// property owner; the database policies enforce this.
+export type MitigationStatus = 'planned' | 'in_progress' | 'completed' | 'verified';
+
+export interface MitigationAction {
+  id: string;
+  assessmentId: string;
+  recommendationId: string;
+  category: RiskCategory;
+  priority?: Recommendation['priority'];
+  title: string;
+  status: MitigationStatus;
+  notes?: string;
+  evidencePhotoIds: string[];
+  completedAt?: string;
+  verifiedAt?: string;
+  verifiedBy?: string;
+  createdBy?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface ResourceLink {
   title: string;
   url: string;

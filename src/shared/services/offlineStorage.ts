@@ -2,11 +2,13 @@ import Dexie, { Table } from 'dexie';
 import { v4 as uuidv4 } from 'uuid';
 import { supabase, getPhotoUrl } from './supabaseClient';
 import { upsertByDomainId } from './syncUpsert';
+import { mitigationFromRow, mitigationToRow } from './mitigationRows';
 import type {
   AnalyticsEvent,
   Assessment,
   AssessmentPhoto,
   Finding,
+  MitigationAction,
   Property,
   SyncOperation,
   TrainingProgress,
@@ -23,6 +25,7 @@ class WildfireRiskDB extends Dexie {
   syncQueue!: Table<SyncOperation>;
   cachedTrainingContent!: Table<{ id: string; content: unknown; cachedAt: string }>;
   analyticsEvents!: Table<AnalyticsEvent & { localId?: number }>;
+  mitigationActions!: Table<MitigationAction>;
 
   constructor() {
     super('WildfireRiskDB');
@@ -55,6 +58,14 @@ class WildfireRiskDB extends Dexie {
     // and the service worker's model-cache (ONNX + wasm runtime).
     this.version(4).stores({
       cachedModels: null,
+    });
+
+    // v5: mitigation tracking. Keyed by the domain id directly (unlike the
+    // ++localId tables) because the id is deterministic per
+    // (assessment, recommendation) — see mitigationActionId().
+    // Must stay after v4: production devices are already on v4.
+    this.version(5).stores({
+      mitigationActions: 'id, assessmentId, recommendationId, status',
     });
   }
 }
@@ -203,6 +214,23 @@ async function executeSyncOperation(operation: SyncOperation): Promise<void> {
     return;
   }
 
+  // Mitigation actions upsert the full record and surface errors so a failed
+  // write stays in the queue for retry. Upsert (not insert/update) makes the
+  // write idempotent: a create that never landed is repaired by the next edit,
+  // and two devices writing the same deterministic id converge.
+  if (table === 'mitigation_actions') {
+    if (type === 'delete') {
+      const { error } = await supabase.from(table).delete().eq('id', recordId);
+      if (error) throw error;
+    } else {
+      const { error } = await supabase
+        .from(table)
+        .upsert(mitigationToRow(data as MitigationAction), { onConflict: 'id' });
+      if (error) throw error;
+    }
+    return;
+  }
+
   switch (type) {
     case 'create':
       await supabase.from(table).insert(toRow(table, data as Record<string, unknown>));
@@ -281,6 +309,18 @@ export async function pullRemoteData(userId: string): Promise<void> {
       photos,
       dirty
     );
+
+    // Mitigation actions: keyed by id (no localId), so put() replaces in place.
+    // Skip records with an unpushed local edit, same rule as upsertByDomainId.
+    const { data: mitRows, error: mitErr } = await supabase
+      .from('mitigation_actions')
+      .select('*')
+      .in('assessment_id', assessmentIds);
+    if (mitErr) throw mitErr;
+    const actions = (mitRows ?? [])
+      .map((r) => mitigationFromRow(r as Record<string, unknown>))
+      .filter((a) => !dirty.has(a.id));
+    if (actions.length > 0) await db.mitigationActions.bulkPut(actions);
   }
 
   // Training progress is keyed by its own id (no localId); replace by id. It is
@@ -438,6 +478,35 @@ export async function getLocalAnnotations(assessmentId: string): Promise<MapAnno
   return db.annotations.where('assessmentId').equals(assessmentId).toArray();
 }
 
+// Mitigation action operations. One write helper covers create and update:
+// the sync path upserts the full record either way.
+export async function saveMitigationActionLocally(action: MitigationAction): Promise<void> {
+  const existing = await db.mitigationActions.get(action.id);
+  await db.mitigationActions.put(action);
+  await queueSyncOperation({
+    type: existing ? 'update' : 'create',
+    table: 'mitigation_actions',
+    recordId: action.id,
+    data: action,
+  });
+}
+
+export async function deleteMitigationActionLocally(id: string): Promise<void> {
+  await db.mitigationActions.delete(id);
+  await queueSyncOperation({
+    type: 'delete',
+    table: 'mitigation_actions',
+    recordId: id,
+    data: {},
+  });
+}
+
+export async function getLocalMitigationActions(
+  assessmentId: string
+): Promise<MitigationAction[]> {
+  return db.mitigationActions.where('assessmentId').equals(assessmentId).toArray();
+}
+
 // Photo operations
 export async function savePhotoLocally(
   photo: AssessmentPhoto,
@@ -553,6 +622,7 @@ export async function exportDatabase(): Promise<unknown> {
     photos: await db.photos.toArray(),
     annotations: await db.annotations.toArray(),
     trainingProgress: await db.trainingProgress.toArray(),
+    mitigationActions: await db.mitigationActions.toArray(),
     syncQueue: await db.syncQueue.toArray(),
   };
 }

@@ -13,6 +13,7 @@ import { PhotoGallery } from './components/PhotoGallery';
 import { guidelineProfileById } from './content/guidelines';
 import { LoadingSpinner } from '@/shared/components/LoadingScreen';
 import { ShareDialog } from '@/features/sharing/components/ShareDialog';
+import { RecommendationTracker } from '@/features/mitigation/components/RecommendationTracker';
 import type { Assessment, Property, RiskLevel } from '@/shared/types';
 
 function getRiskLevel(score: number): RiskLevel {
@@ -303,49 +304,13 @@ export default function AssessmentDetail() {
         </div>
       )}
 
-      {/* Recommendations */}
+      {/* Recommendations, with mitigation progress tracking */}
       {assessment.recommendations && assessment.recommendations.length > 0 && (
-        <div className="card">
-          <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
-            <h2 className="text-lg font-medium text-gray-900 dark:text-white">
-              Recommendations
-            </h2>
-          </div>
-          <ul className="divide-y divide-gray-200 dark:divide-gray-700">
-            {assessment.recommendations.map((rec) => (
-              <li key={rec.id} className="px-6 py-4">
-                <div className="flex items-start justify-between">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <p className="font-medium text-gray-900 dark:text-white">
-                        {rec.title}
-                      </p>
-                      <span
-                        className={`text-xs px-2 py-0.5 rounded-full ${
-                          rec.priority === 'immediate'
-                            ? 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-200'
-                            : rec.priority === 'short-term'
-                            ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-200'
-                            : 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-200'
-                        }`}
-                      >
-                        {rec.priority}
-                      </span>
-                    </div>
-                    <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                      {rec.description}
-                    </p>
-                  </div>
-                  {rec.estimatedCost && (
-                    <span className="text-sm text-gray-500 dark:text-gray-400 whitespace-nowrap ml-4">
-                      {rec.estimatedCost}
-                    </span>
-                  )}
-                </div>
-              </li>
-            ))}
-          </ul>
-        </div>
+        <RecommendationTracker
+          assessmentId={assessment.id}
+          recommendations={assessment.recommendations}
+          readOnly={isSharedView}
+        />
       )}
 
       {/* Photos */}
