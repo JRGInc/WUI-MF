@@ -11,3 +11,9 @@ create table storage.objects (id uuid primary key default gen_random_uuid(), buc
 alter table storage.objects enable row level security;
 grant usage on schema storage to anon, authenticated;
 grant all on storage.objects to anon, authenticated;
+-- Supabase's default privileges: objects created in public by the migration
+-- role are explicitly granted to anon/authenticated/service_role. Revoking
+-- from PUBLIC does not remove these grants, so migrations must revoke from
+-- anon explicitly; mirroring them here lets the tests catch that.
+alter default privileges in schema public grant execute on functions to anon, authenticated, service_role;
+alter default privileges in schema public grant all on tables to anon, authenticated, service_role;

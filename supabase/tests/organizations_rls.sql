@@ -188,6 +188,10 @@ select pg_temp.check('anon cannot read memberships or submissions',
 select pg_temp.check('an agency submission does not make the assessment public',
   (select count(*) from public.assessments where id = 'f0000000-0000-4000-8000-000000000001') = 0);
 reset role;
+select pg_temp.check('anon has no execute privilege on the verification functions',
+  not has_function_privilege('anon', 'public.verify_mitigation_action(uuid, uuid, text)', 'execute')
+  and not has_function_privilege('anon', 'public.revoke_mitigation_verification(uuid)', 'execute')
+  and has_function_privilege('authenticated', 'public.verify_mitigation_action(uuid, uuid, text)', 'execute'));
 select pg_temp.check('anon cannot verify',
   pg_temp.status_of('90000000-0000-4000-8000-000000000001') = 'completed');
 
