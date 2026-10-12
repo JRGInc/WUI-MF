@@ -1,4 +1,4 @@
-import { createClient } from '@supabase/supabase-js';
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://your-project.supabase.co';
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'your-anon-key';
@@ -16,6 +16,31 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     },
   },
 });
+
+/**
+ * Client for the public /report/:token view. It sends the share token in the
+ * `x-share-token` header, which RLS checks (assessment_is_shared): a token
+ * holder can read exactly the one report it was issued for. No session — the
+ * view is anonymous even when someone is signed in, so it never mixes the
+ * reader's own access into the shared report.
+ */
+const shareClients = new Map<string, SupabaseClient>();
+export function shareClient(token: string): SupabaseClient {
+  let client = shareClients.get(token);
+  if (!client) {
+    client = createClient(supabaseUrl, supabaseAnonKey, {
+      global: { headers: { 'x-share-token': token } },
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false,
+        detectSessionInUrl: false,
+        storageKey: `wui-share-${token}`,
+      },
+    });
+    shareClients.set(token, client);
+  }
+  return client;
+}
 
 // Helper functions for common operations
 export async function uploadPhoto(

@@ -25,14 +25,40 @@ describe('mitigationToRow', () => {
   });
 
   it('never sends verification or updated_at fields', () => {
-    const row = mitigationToRow({ ...action, verifiedAt: 'x', verifiedBy: 'y' });
+    const row = mitigationToRow({
+      ...action,
+      verifiedAt: 'x',
+      verifiedBy: 'y',
+      verifierOrganizationId: 'org',
+      verificationNote: 'note',
+    });
     expect(row).not.toHaveProperty('verified_at');
     expect(row).not.toHaveProperty('verified_by');
+    expect(row).not.toHaveProperty('verifier_organization_id');
+    expect(row).not.toHaveProperty('verification_note');
     expect(row).not.toHaveProperty('updated_at');
   });
 });
 
 describe('mitigationFromRow', () => {
+  it('maps the server-written verification fields', () => {
+    const back = mitigationFromRow({
+      ...mitigationToRow(action),
+      status: 'verified',
+      verified_at: '2026-10-12T10:00:00.000Z',
+      verified_by: 'inspector-1',
+      verifier_organization_id: 'org-1',
+      verification_note: 'Checked on site',
+      updated_at: action.updatedAt,
+    });
+    expect(back).toMatchObject({
+      status: 'verified',
+      verifiedBy: 'inspector-1',
+      verifierOrganizationId: 'org-1',
+      verificationNote: 'Checked on site',
+    });
+  });
+
   it('round-trips and maps nulls to undefined', () => {
     const row = {
       ...mitigationToRow(action),

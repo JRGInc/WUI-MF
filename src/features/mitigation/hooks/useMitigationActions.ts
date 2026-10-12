@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { v4 as uuidv4 } from 'uuid';
-import { supabase } from '@/shared/services/supabaseClient';
+import { useDataClient } from '@/shared/services/dataClient';
 import {
   db,
   deleteMitigationActionLocally,
@@ -25,7 +25,9 @@ import {
   isLocked,
   mergeActions,
   MitigationChangeError,
+  remoteVerificationWins,
 } from '../mitigationProgress';
+import { revokeVerification, verifyMitigation } from '@/features/organizations/organizationsService';
 
 export type StatusChoice = MitigationStatus | 'not_started';
 
@@ -34,12 +36,14 @@ export type StatusChoice = MitigationStatus | 'not_started';
  * over remote rows (they may hold unpushed edits); remote rows fill in records
  * created on another device or for an assessment that was saved online.
  *
- * In readOnly mode (the shared /report/:token view) it only reads remote rows,
- * which RLS exposes via mitigation_select_shared.
+ * In readOnly mode (the shared /report/:token view, or an inspector reviewing
+ * a submitted assessment) it only reads remote rows, which RLS exposes via
+ * mitigation_select_shared / mitigation_select_reviewer.
  */
 export function useMitigationActions(assessmentId: string, readOnly = false) {
   const { user } = useAuth();
   const { isOnline, syncNow } = useOffline();
+  const supabase = useDataClient();
   const [actions, setActions] = useState<MitigationAction[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -69,18 +73,25 @@ export function useMitigationActions(assessmentId: string, readOnly = false) {
         pendingDeletes = new Set(ops.map((op) => op.recordId));
       }
 
-      setActions(
-        mergeActions(
-          remote.filter((a) => !pendingDeletes.has(a.id)),
-          local
-        )
-      );
+      const liveRemote = remote.filter((a) => !pendingDeletes.has(a.id));
+      setActions(mergeActions(liveRemote, local));
+
+      // Store server-decided verification changes locally (not queued — they
+      // are server writes) so the owner sees them offline too.
+      if (!readOnly) {
+        const localById = new Map(local.map((a) => [a.id, a]));
+        const adopted = liveRemote.filter((r) => {
+          const l = localById.get(r.id);
+          return l !== undefined && l.status !== r.status && remoteVerificationWins(r, l);
+        });
+        if (adopted.length > 0) await db.mitigationActions.bulkPut(adopted);
+      }
     } catch (error) {
       console.error('Error loading mitigation actions:', error);
     } finally {
       setIsLoading(false);
     }
-  }, [assessmentId, readOnly]);
+  }, [assessmentId, readOnly, supabase]);
 
   useEffect(() => {
     void load();
@@ -159,5 +170,35 @@ export function useMitigationActions(assessmentId: string, readOnly = false) {
     void track('mitigation_evidence_added', { category: rec.category });
   }
 
-  return { actions, isLoading, actionFor, setStatus, setNotes, attachEvidence, reload: load };
+  function replace(next: MitigationAction) {
+    setActions((prev) => [...prev.filter((a) => a.id !== next.id), next]);
+  }
+
+  /** Inspector: verify a completed item for `organizationId` (online only). */
+  async function verify(rec: Recommendation, organizationId: string, note?: string): Promise<void> {
+    const existing = actionFor(rec.id);
+    if (!existing) throw new MitigationChangeError('Only completed mitigations can be verified.');
+    replace(await verifyMitigation(existing.id, organizationId, note));
+    void track('mitigation_verified', { category: rec.category, priority: rec.priority });
+  }
+
+  /** Inspector: undo a verification their organization made (online only). */
+  async function revoke(rec: Recommendation): Promise<void> {
+    const existing = actionFor(rec.id);
+    if (!existing) return;
+    replace(await revokeVerification(existing.id));
+    void track('mitigation_verification_revoked', { category: rec.category });
+  }
+
+  return {
+    actions,
+    isLoading,
+    actionFor,
+    setStatus,
+    setNotes,
+    attachEvidence,
+    verify,
+    revoke,
+    reload: load,
+  };
 }

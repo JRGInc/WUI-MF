@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { getLocalPhotos, photoDisplayUrl, fromRow } from '@/shared/services/offlineStorage';
-import { supabase } from '@/shared/services/supabaseClient';
+import { useDataClient } from '@/shared/services/dataClient';
 import type { AssessmentPhoto } from '@/shared/types';
 
 interface PhotoGalleryProps {
@@ -15,10 +15,12 @@ interface PhotoGalleryProps {
  *
  * When there are no local photos (a shared /report/:token view, or an
  * assessment the viewer hasn't synced), it falls back to fetching photo
- * metadata from Supabase — RLS (photos_select_shared) permits the shared read.
+ * metadata from Supabase — RLS (photos_select_shared, bound to the share token
+ * via useDataClient) permits the shared read.
  */
 export function PhotoGallery({ assessmentId }: PhotoGalleryProps) {
   const [items, setItems] = useState<{ photo: AssessmentPhoto; url: string }[]>([]);
+  const supabase = useDataClient();
 
   useEffect(() => {
     const objectUrls: string[] = [];
@@ -53,7 +55,7 @@ export function PhotoGallery({ assessmentId }: PhotoGalleryProps) {
       cancelled = true;
       objectUrls.forEach(URL.revokeObjectURL);
     };
-  }, [assessmentId]);
+  }, [assessmentId, supabase]);
 
   if (items.length === 0) return null;
 

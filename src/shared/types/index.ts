@@ -91,9 +91,47 @@ export interface MitigationAction {
   completedAt?: string;
   verifiedAt?: string;
   verifiedBy?: string;
+  /** Organization the verifying inspector acted for. */
+  verifierOrganizationId?: string;
+  verificationNote?: string;
   createdBy?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+// Organizations & roles — agencies, local governments, insurers, NGOs whose
+// members review submitted assessments. Memberships are provisioned server-side
+// (service role); 'inspector' and 'admin' may verify mitigations, 'viewer' reads.
+export type OrganizationKind =
+  | 'fire_agency'
+  | 'local_government'
+  | 'state_agency'
+  | 'insurer'
+  | 'ngo'
+  | 'other';
+
+export type OrganizationRole = 'admin' | 'inspector' | 'viewer';
+
+export interface Organization {
+  id: string;
+  name: string;
+  kind: OrganizationKind;
+  stateCode?: string;
+}
+
+export interface OrganizationMembership {
+  organization: Organization;
+  role: OrganizationRole;
+}
+
+/** An assessment a homeowner sent to an organization for review/verification. */
+export interface AssessmentSubmission {
+  id: string;
+  assessmentId: string;
+  organizationId: string;
+  submittedBy?: string;
+  status: 'submitted' | 'in_review' | 'closed';
+  submittedAt: string;
 }
 
 export interface ResourceLink {

@@ -17,6 +17,7 @@ const ARViewer = lazy(() => import('@/features/augmented-reality/components/ARVi
 const TrainingHub = lazy(() => import('@/features/training/TrainingHub'));
 const LessonViewer = lazy(() => import('@/features/training/components/LessonViewer'));
 const Settings = lazy(() => import('@/features/settings/Settings'));
+const ReviewQueue = lazy(() => import('@/features/organizations/ReviewQueue'));
 const Login = lazy(() => import('@/features/auth/Login'));
 const Register = lazy(() => import('@/features/auth/Register'));
 const PrivacyPolicy = lazy(() => import('@/features/legal/PrivacyPolicy'));
@@ -51,6 +52,7 @@ function App() {
                     <Route path="/training/:courseId" element={<LessonViewer />} />
                     <Route path="/training/:courseId/:lessonId" element={<LessonViewer />} />
                     <Route path="/settings" element={<Settings />} />
+                    <Route path="/inspections" element={<ReviewQueue />} />
                   </Route>
                 </Route>
 

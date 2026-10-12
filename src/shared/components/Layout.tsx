@@ -13,11 +13,13 @@ import {
   SignalIcon,
   SignalSlashIcon,
   ArrowRightOnRectangleIcon,
+  ClipboardDocumentListIcon,
 } from '@heroicons/react/24/outline';
 import { useAuth } from '@/app/providers/AuthProvider';
 import { useOffline } from '@/app/providers/OfflineProvider';
+import { useMyMemberships } from '@/features/organizations/hooks/useMyMemberships';
 
-const navigation = [
+const baseNavigation = [
   { name: 'Dashboard', href: '/', icon: HomeIcon },
   { name: 'New Assessment', href: '/assessment/new', icon: ClipboardDocumentCheckIcon },
   { name: 'Risk Map', href: '/map', icon: MapIcon },
@@ -26,11 +28,19 @@ const navigation = [
   { name: 'Settings', href: '/settings', icon: Cog6ToothIcon },
 ];
 
+// Shown only to organization members (inspectors, reviewers, admins).
+const inspectionsNavItem = { name: 'Inspections', href: '/inspections', icon: ClipboardDocumentListIcon };
+
 export function Layout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const { user, signOut } = useAuth();
   const { isOnline, isSyncing, pendingOperations } = useOffline();
   const navigate = useNavigate();
+  const memberships = useMyMemberships();
+  const navigation =
+    memberships.length > 0
+      ? [...baseNavigation.slice(0, -1), inspectionsNavItem, baseNavigation[baseNavigation.length - 1]]
+      : baseNavigation;
 
   const handleSignOut = async () => {
     await signOut();

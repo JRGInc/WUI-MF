@@ -1,7 +1,10 @@
 import { useState } from 'react';
 import { CameraIcon, CheckBadgeIcon } from '@heroicons/react/24/outline';
-import { showErrorToast } from '@/shared/stores/toastStore';
-import type { MitigationAction, Recommendation } from '@/shared/types';
+import { showErrorToast, showSuccessToast } from '@/shared/stores/toastStore';
+import { useOffline } from '@/app/providers/OfflineProvider';
+import type { MitigationAction, OrganizationMembership, Recommendation } from '@/shared/types';
+import { useOrganizations } from '@/features/organizations/hooks/useOrganizations';
+import { VerificationError } from '@/features/organizations/organizationsService';
 import { useMitigationActions, type StatusChoice } from '../hooks/useMitigationActions';
 import {
   MitigationChangeError,
@@ -12,8 +15,13 @@ import {
 interface RecommendationTrackerProps {
   assessmentId: string;
   recommendations: Recommendation[];
-  /** Shared /report/:token view: show progress, no controls. */
+  /** Shared /report/:token view or a reviewer: show progress, no owner controls. */
   readOnly?: boolean;
+  /**
+   * Inspector/admin reviewing a submitted assessment: offer Verify on completed
+   * items and Revoke on items their organization verified. Implies readOnly.
+   */
+  verifyAs?: OrganizationMembership;
 }
 
 const OWNER_CHOICES: StatusChoice[] = ['not_started', 'planned', 'in_progress', 'completed'];
@@ -33,7 +41,7 @@ const STATUS_BADGE_CLASS: Record<StatusChoice, string> = {
 };
 
 function reportError(error: unknown) {
-  if (error instanceof MitigationChangeError) {
+  if (error instanceof MitigationChangeError || error instanceof VerificationError) {
     showErrorToast('Cannot change this item', error.message);
   } else {
     console.error('Mitigation update failed:', error);
@@ -51,11 +59,14 @@ export function RecommendationTracker({
   assessmentId,
   recommendations,
   readOnly = false,
+  verifyAs,
 }: RecommendationTrackerProps) {
-  const { actions, actionFor, setStatus, setNotes, attachEvidence } = useMitigationActions(
-    assessmentId,
-    readOnly
-  );
+  const { actions, actionFor, setStatus, setNotes, attachEvidence, verify, revoke } =
+    useMitigationActions(assessmentId, readOnly || verifyAs !== undefined);
+  const { isOnline } = useOffline();
+  // Only needed to name the verifying organization; skip the fetch otherwise.
+  const organizations = useOrganizations(actions.some((a) => a.verifierOrganizationId));
+  const orgName = (id?: string) => organizations.find((o) => o.id === id)?.name;
 
   if (recommendations.length === 0) return null;
 
@@ -101,7 +112,19 @@ export function RecommendationTracker({
             key={rec.id}
             rec={rec}
             action={actionFor(rec.id)}
-            readOnly={readOnly}
+            readOnly={readOnly || verifyAs !== undefined}
+            verifierName={orgName(actionFor(rec.id)?.verifierOrganizationId)}
+            review={
+              verifyAs && {
+                organizationId: verifyAs.organization.id,
+                online: isOnline,
+                onVerify: (note) =>
+                  verify(rec, verifyAs.organization.id, note)
+                    .then(() => showSuccessToast('Verified', rec.title))
+                    .catch(reportError),
+                onRevoke: () => revoke(rec).catch(reportError),
+              }
+            }
             onStatus={(choice) => setStatus(rec, choice).catch(reportError)}
             onNotes={(notes) => setNotes(rec, notes).catch(reportError)}
             onEvidence={(file) => attachEvidence(rec, file).catch(reportError)}
@@ -112,10 +135,19 @@ export function RecommendationTracker({
   );
 }
 
+interface ReviewControls {
+  organizationId: string;
+  online: boolean;
+  onVerify: (note: string) => Promise<void>;
+  onRevoke: () => Promise<void>;
+}
+
 interface RecommendationRowProps {
   rec: Recommendation;
   action: MitigationAction | undefined;
   readOnly: boolean;
+  verifierName?: string;
+  review?: ReviewControls;
   onStatus: (choice: StatusChoice) => void;
   onNotes: (notes: string) => void;
   onEvidence: (file: File) => void;
@@ -125,6 +157,8 @@ function RecommendationRow({
   rec,
   action,
   readOnly,
+  verifierName,
+  review,
   onStatus,
   onNotes,
   onEvidence,
@@ -171,6 +205,7 @@ function RecommendationRow({
           {action?.verifiedAt && (
             <span className="text-gray-500 dark:text-gray-400">
               Verified {new Date(action.verifiedAt).toLocaleDateString()}
+              {verifierName && ` by ${verifierName}`}
             </span>
           )}
           {photoCount > 0 && (
@@ -181,6 +216,12 @@ function RecommendationRow({
           {action?.notes && (
             <p className="w-full text-gray-600 dark:text-gray-300">{action.notes}</p>
           )}
+          {action?.verificationNote && (
+            <p className="w-full text-gray-600 dark:text-gray-300">
+              <span className="font-medium">Inspector note:</span> {action.verificationNote}
+            </p>
+          )}
+          {review && action && <ReviewActions action={action} review={review} />}
         </div>
       ) : (
         <>
@@ -277,5 +318,95 @@ function RecommendationRow({
         </>
       )}
     </li>
+  );
+}
+
+function ReviewActions({ action, review }: { action: MitigationAction; review: ReviewControls }) {
+  const [noteOpen, setNoteOpen] = useState(false);
+  const [note, setNote] = useState('');
+  const [busy, setBusy] = useState(false);
+  const offlineHint = review.online ? undefined : 'Connect to the internet to verify';
+
+  async function run(fn: () => Promise<void>) {
+    setBusy(true);
+    try {
+      await fn();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (action.status === 'verified') {
+    if (action.verifierOrganizationId !== review.organizationId) return null;
+    return (
+      <button
+        type="button"
+        disabled={busy || !review.online}
+        title={offlineHint}
+        onClick={() => {
+          if (window.confirm('Revoke this verification? The item returns to "Done" and the owner can edit it again.')) {
+            void run(review.onRevoke);
+          }
+        }}
+        className="text-sm text-gray-600 hover:text-red-700 dark:text-gray-300 disabled:opacity-50"
+      >
+        Revoke verification
+      </button>
+    );
+  }
+
+  if (action.status !== 'completed') return null;
+
+  if (!noteOpen) {
+    return (
+      <button
+        type="button"
+        disabled={!review.online}
+        title={offlineHint}
+        onClick={() => setNoteOpen(true)}
+        className="btn-primary text-sm inline-flex items-center gap-1 disabled:opacity-50"
+      >
+        <CheckBadgeIcon className="w-4 h-4" aria-hidden="true" />
+        Verify
+      </button>
+    );
+  }
+
+  return (
+    <div className="w-full space-y-2">
+      <label htmlFor={`verify-note-${action.id}`} className="block text-sm text-gray-700 dark:text-gray-300">
+        Verification note (optional)
+      </label>
+      <textarea
+        id={`verify-note-${action.id}`}
+        className="input w-full text-sm"
+        rows={2}
+        placeholder="How it was checked, e.g. on-site inspection"
+        value={note}
+        onChange={(e) => setNote(e.target.value)}
+      />
+      <div className="flex gap-2">
+        <button
+          type="button"
+          disabled={busy || !review.online}
+          title={offlineHint}
+          onClick={() => void run(() => review.onVerify(note))}
+          className="btn-primary text-sm disabled:opacity-50"
+        >
+          Confirm verification
+        </button>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => {
+            setNoteOpen(false);
+            setNote('');
+          }}
+          className="btn-outline text-sm"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
   );
 }

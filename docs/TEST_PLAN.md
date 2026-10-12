@@ -241,6 +241,28 @@ Two browsers (A and B) signed into the **same** account.
 | SHARE-01 | Open shared report | Open a valid `/report/:token` link. | Read-only assessment report renders without login. |
 | SHARE-02 | Invalid/expired token | Open a bad token. | Graceful "not found/expired" state; no crash, no data leak. |
 | SHARE-03 | Photos in shared report | Open a valid `/report/:token` for an assessment that has photos, in a browser not signed into the owner account. | Photos appear (fetched from Supabase under the shared-read RLS policy). |
+| SHARE-04 | Token-bound access | Signed out, with a valid share link open in one tab, query `/rest/v1/assessments?select=id` and `/rest/v1/shared_reports?select=id` with only the anon key (no `x-share-token` header); then open `/report/<random-uuid>`. | Both queries return `[]` (no listing of shares or shared assessments); the random token shows the not-found state. The valid link still renders its own report, findings, progress and photos. |
+
+---
+
+## 13a. Agency submission & inspector verification
+
+Needs a provisioned organization and an inspector account (see CLAUDE.md, "Organizations & inspector verification"). Use **two accounts**: the homeowner and the inspector.
+
+| ID | Test | Steps | Expected |
+|---|---|---|---|
+| VER-01 | Submit to an agency | As the homeowner, open a synced assessment → Share → **Agency**, pick the organization, **Submit to Fire Agency**. | Toast "Submitted"; the organization is listed under the picker with a submit date and is removed from the picker. In-state organizations are listed first. |
+| VER-02 | Submission is not public | After VER-01, open `/assessment/<id>` signed in as an unrelated third account, and query the assessment while signed out. | Not found / no access. An agency submission does not create a public share link. |
+| VER-03 | Inspector sees the queue | Sign in as the inspector. | An **Inspections** nav item appears (hidden for accounts with no organization). It lists the submitted assessment with address, date and score. |
+| VER-04 | Read-only review | Open the assessment from Inspections. | Report renders with a "Reviewing for <org>" chip; no Share/Edit, no map/AR shortcuts, no owner status buttons. |
+| VER-05 | Verify a completed item | On an item the owner marked **Done**, tap **Verify**, add an optional note, **Confirm verification**. | Toast "Verified"; the item shows the Verified badge, "Verified <date> by <org>", and the inspector note. Items not marked Done have no Verify button. |
+| VER-06 | Owner sees the verification | As the homeowner, reload the report (online), then go offline and reload. | The item shows Verified by <org> with the note, and its controls are locked. Still verified offline. |
+| VER-07 | Owner edit raced by a verification | As the homeowner, go offline, change the note on a Done item, then (as the inspector, online) verify that item; bring the homeowner back online. | The homeowner's queued edit is dropped, not left as a failed operation; the item shows Verified. |
+| VER-08 | Revoke | As the inspector, on an item your org verified, **Revoke verification** → confirm. | The item returns to Done; verification fields clear; the owner can edit it again. |
+| VER-09 | Viewer role | Sign in as a **viewer** member of the org and open the submission. | Read-only review; no Verify/Revoke buttons. |
+| VER-10 | Own property | As an inspector, submit **your own** assessment to your org and try to verify one of its Done items. | Error toast: "You cannot verify mitigation on your own property". |
+| VER-11 | Offline inspector | As the inspector, go offline on a review. | Verify/Revoke are disabled with a "Connect to the internet to verify" hint. |
+| VER-12 | Withdraw | As the homeowner, Share → Agency → **Withdraw**. | The submission disappears; the inspector can no longer open the assessment. |
 
 ---
 

@@ -226,7 +226,17 @@ async function executeSyncOperation(operation: SyncOperation): Promise<void> {
       const { error } = await supabase
         .from(table)
         .upsert(mitigationToRow(data as MitigationAction), { onConflict: 'id' });
-      if (error) throw error;
+      if (error) {
+        // An inspector verified the row after this edit was queued: RLS locks
+        // it, so the edit can never land. Adopt the server's verified record
+        // and drop the op instead of retrying it into a permanent failure.
+        const { data: current } = await supabase.from(table).select('*').eq('id', recordId).maybeSingle();
+        if (current?.status === 'verified') {
+          await db.mitigationActions.put(mitigationFromRow(current as Record<string, unknown>));
+          return;
+        }
+        throw error;
+      }
     }
     return;
   }
@@ -311,7 +321,9 @@ export async function pullRemoteData(userId: string): Promise<void> {
     );
 
     // Mitigation actions: keyed by id (no localId), so put() replaces in place.
-    // Skip records with an unpushed local edit, same rule as upsertByDomainId.
+    // Skip records with an unpushed local edit, same rule as upsertByDomainId —
+    // except verified ones: that edit can never land (the row is locked), and
+    // the sync path drops it (see executeSyncOperation).
     const { data: mitRows, error: mitErr } = await supabase
       .from('mitigation_actions')
       .select('*')
@@ -319,7 +331,7 @@ export async function pullRemoteData(userId: string): Promise<void> {
     if (mitErr) throw mitErr;
     const actions = (mitRows ?? [])
       .map((r) => mitigationFromRow(r as Record<string, unknown>))
-      .filter((a) => !dirty.has(a.id));
+      .filter((a) => !dirty.has(a.id) || a.status === 'verified');
     if (actions.length > 0) await db.mitigationActions.bulkPut(actions);
   }
 

@@ -6,9 +6,11 @@ import type { MitigationAction, MitigationStatus, RiskCategory, Recommendation }
 // server. Pure so they can be unit-tested.
 
 /**
- * Domain → row for client writes. verified_at / verified_by are deliberately
- * never sent: verification is third-party only and RLS rejects owner rows that
- * carry it. updated_at is set by a server trigger.
+ * Domain → row for client writes. The verification fields (verified_at,
+ * verified_by, verifier_organization_id, verification_note) are deliberately
+ * never sent: verification is third-party only, written by the
+ * verify_mitigation_action() function, and RLS rejects owner rows that carry
+ * it. updated_at is set by a server trigger.
  */
 export function mitigationToRow(a: MitigationAction): Record<string, unknown> {
   return {
@@ -43,6 +45,8 @@ export function mitigationFromRow(r: Record<string, unknown>): MitigationAction 
     completedAt: opt<string>(r.completed_at),
     verifiedAt: opt<string>(r.verified_at),
     verifiedBy: opt<string>(r.verified_by),
+    verifierOrganizationId: opt<string>(r.verifier_organization_id),
+    verificationNote: opt<string>(r.verification_note),
     createdBy: opt<string>(r.created_by),
     createdAt: r.created_at as string,
     updatedAt: r.updated_at as string,

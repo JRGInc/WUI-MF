@@ -200,6 +200,8 @@ export interface Database {
           completed_at: string | null;
           verified_at: string | null;
           verified_by: string | null;
+          verifier_organization_id: string | null;
+          verification_note: string | null;
           created_by: string | null;
           created_at: string;
           updated_at: string;
@@ -217,6 +219,8 @@ export interface Database {
           completed_at?: string | null;
           verified_at?: string | null;
           verified_by?: string | null;
+          verifier_organization_id?: string | null;
+          verification_note?: string | null;
           created_by?: string | null;
           created_at?: string;
           updated_at?: string;
@@ -234,9 +238,80 @@ export interface Database {
           completed_at?: string | null;
           verified_at?: string | null;
           verified_by?: string | null;
+          verifier_organization_id?: string | null;
+          verification_note?: string | null;
           created_by?: string | null;
           created_at?: string;
           updated_at?: string;
+        };
+      };
+      organizations: {
+        Row: {
+          id: string;
+          name: string;
+          kind: string;
+          state_code: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          name: string;
+          kind: string;
+          state_code?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          name?: string;
+          kind?: string;
+          state_code?: string | null;
+          created_at?: string;
+        };
+      };
+      organization_members: {
+        Row: {
+          organization_id: string;
+          user_id: string;
+          role: string;
+          created_at: string;
+        };
+        Insert: {
+          organization_id: string;
+          user_id: string;
+          role: string;
+          created_at?: string;
+        };
+        Update: {
+          organization_id?: string;
+          user_id?: string;
+          role?: string;
+          created_at?: string;
+        };
+      };
+      assessment_submissions: {
+        Row: {
+          id: string;
+          assessment_id: string;
+          organization_id: string;
+          submitted_by: string | null;
+          status: string;
+          submitted_at: string;
+        };
+        Insert: {
+          id?: string;
+          assessment_id: string;
+          organization_id: string;
+          submitted_by?: string | null;
+          status?: string;
+          submitted_at?: string;
+        };
+        Update: {
+          id?: string;
+          assessment_id?: string;
+          organization_id?: string;
+          submitted_by?: string | null;
+          status?: string;
+          submitted_at?: string;
         };
       };
       training_progress: {

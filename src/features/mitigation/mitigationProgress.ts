@@ -171,14 +171,34 @@ export function summarizeMitigation(
 }
 
 /**
- * Merge remote and local action lists by id. Local wins: it holds edits the
- * sync queue has not pushed yet.
+ * True when the server's copy must replace the local one regardless of local
+ * edits: verification is third-party and authoritative. Either the server
+ * verified it (the owner's local edit can never land — RLS locks the row), or
+ * the local copy is verified and the server's is not (an inspector revoked it;
+ * an owner can never produce a local verified record).
+ */
+export function remoteVerificationWins(
+  remote: MitigationAction,
+  local: MitigationAction | undefined
+): boolean {
+  if (!local) return true;
+  return remote.status === 'verified' || local.status === 'verified';
+}
+
+/**
+ * Merge remote and local action lists by id. Local wins (it holds edits the
+ * sync queue has not pushed yet), except where verification decides — see
+ * remoteVerificationWins.
  */
 export function mergeActions(
   remote: MitigationAction[],
   local: MitigationAction[]
 ): MitigationAction[] {
+  const remoteById = new Map(remote.map((a) => [a.id, a]));
   const merged = new Map(remote.map((a) => [a.id, a]));
-  for (const a of local) merged.set(a.id, a);
+  for (const a of local) {
+    const r = remoteById.get(a.id);
+    if (!r || !remoteVerificationWins(r, a)) merged.set(a.id, a);
+  }
   return [...merged.values()];
 }

@@ -7,6 +7,7 @@ import {
   mergeActions,
   MitigationChangeError,
   mitigationActionId,
+  remoteVerificationWins,
   summarizeMitigation,
 } from './mitigationProgress';
 
@@ -131,5 +132,30 @@ describe('mergeActions', () => {
     const merged = mergeActions([remote, other], [local]);
     expect(merged).toHaveLength(2);
     expect(merged.find((a) => a.recommendationId === 'r1')?.status).toBe('completed');
+  });
+
+  it('lets a server verification override a stale local copy', () => {
+    const local = applyStatusChange(undefined, rec('r1'), 'completed', ctx);
+    const remote: MitigationAction = { ...local, status: 'verified', verifiedAt: later.now };
+    expect(mergeActions([remote], [local])[0].status).toBe('verified');
+  });
+
+  it('lets a server revoke override a local verified copy', () => {
+    const remote = applyStatusChange(undefined, rec('r1'), 'completed', ctx);
+    const local: MitigationAction = { ...remote, status: 'verified', verifiedAt: ctx.now };
+    expect(mergeActions([remote], [local])[0].status).toBe('completed');
+  });
+});
+
+describe('remoteVerificationWins', () => {
+  const base = applyStatusChange(undefined, rec('r1'), 'completed', ctx);
+  const verified: MitigationAction = { ...base, status: 'verified' };
+  it('is false when neither side is verified (local edits win)', () => {
+    expect(remoteVerificationWins(base, { ...base, status: 'in_progress' })).toBe(false);
+  });
+  it('is true when either side is verified, or there is no local copy', () => {
+    expect(remoteVerificationWins(verified, base)).toBe(true);
+    expect(remoteVerificationWins(base, verified)).toBe(true);
+    expect(remoteVerificationWins(base, undefined)).toBe(true);
   });
 });

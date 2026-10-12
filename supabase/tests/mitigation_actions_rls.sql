@@ -46,7 +46,9 @@ select pg_temp.check('anon cannot read unshared', (select count(*) from public.m
 reset role;
 insert into public.shared_reports (assessment_id, share_type, access_token, expires_at) values ('22222222-0000-4000-8000-000000000001','link','tok', now() + interval '1 day');
 set role anon;
-select pg_temp.check('anon can read shared', (select count(*) from public.mitigation_actions) = 1);
+select pg_temp.check('anon without the token cannot read shared', (select count(*) from public.mitigation_actions) = 0);
+select set_config('request.headers', '{"x-share-token":"tok"}', false);
+select pg_temp.check('anon can read shared with the token', (select count(*) from public.mitigation_actions) = 1);
 update public.mitigation_actions set notes = 'hacked';
 reset role;
 select pg_temp.check('anon cannot write shared', (select notes from public.mitigation_actions) is null);

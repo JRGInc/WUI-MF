@@ -73,6 +73,22 @@ The assessment checklist and recommendation rules are data, not component code: 
 
 `src/features/mitigation/` tracks progress on each assessment recommendation (WFCA Phase 2 capability C5-2). One `MitigationAction` per (assessment, recommendation), stored in Dexie `mitigationActions` and the `mitigation_actions` table; no record means "to do". Ids are deterministic (`mitigationActionId`, uuid v5) so two devices converge on one row. Status is `planned | in_progress | completed | verified`; `verified` is third-party only — RLS rejects owner writes that set it and locks a row once verified, and `applyStatusChange` mirrors that client-side. Sync for this table **upserts the full record and throws on error** (special case in `executeSyncOperation`), using the explicit mappers in `mitigationRows.ts` that send `null` for cleared fields. Pure logic lives in `mitigationProgress.ts`; the report UI is `RecommendationTracker`. RLS tests: `supabase/tests/run-rls-tests.sh` (Docker; runs every migration on plain Postgres with stubbed `auth`/`storage` schemas, then each `*_rls.sql`).
 
+### Shared reports (token-bound)
+
+`/report/:token` reads through `shareClient(token)` (`supabaseClient.ts`), which sends the token in an `x-share-token` header. `assessment_is_shared(aid)` matches only a live share for that assessment **with that token** (`request_share_token()` reads PostgREST's `request.headers`), so the `*_select_shared` policies expose exactly one report per token, and share rows aren't publicly listable (migration `20261012110000_share_token_bound_reads.sql`). Components rendered inside the shared view must read via `useDataClient()` (`dataClient.ts`, `ShareTokenContext`), not the `supabase` singleton, or RLS returns nothing. RLS tests: `supabase/tests/share_links_rls.sql`.
+
+### Organizations & inspector verification
+
+`src/features/organizations/` + migration `20261012100000_organizations_inspector_verification.sql`. Tables: `organizations` (public names), `organization_members` (`admin | inspector | viewer`, **service-role writes only** — no self-serve path to inspector), `assessment_submissions` (homeowner → one org; owner inserts/deletes, org members read). Members of an org an assessment was submitted to get **read-only** access via the `*_select_reviewer` policies (`user_can_review_assessment`). Agency submissions deliberately do **not** use `shared_reports`: a share row makes the report public (`assessment_is_shared`). Verification never goes through table writes. Inspectors have no write policy on `mitigation_actions`; they call the SECURITY DEFINER functions `verify_mitigation_action(action, org, note)` / `revoke_mitigation_verification(action)`. These check role, submission, `status = 'completed'` and conflict of interest (no verifying your own property), then stamp `verified_by` / `verified_at` / `verifier_organization_id` / `verification_note` server-side. Verification is online-only. On the owner's device a server verification beats local edits: `remoteVerificationWins` in `mergeActions`, the pull keeps verified rows even when dirty, and the sync path drops an owner upsert that RLS rejects because the row is now verified. UI: the Share dialog's Agency tab (org picker), `/inspections` (`ReviewQueue`, nav item only for members), reviewer mode in `AssessmentDetail`, Verify/Revoke in `RecommendationTracker` (`verifyAs`). RLS tests: `supabase/tests/organizations_rls.sql`.
+
+Provision an organization and inspector (SQL editor / service role):
+
+```sql
+insert into public.organizations (name, kind, state_code) values ('Boise Fire Department', 'fire_agency', 'ID') returning id;
+insert into public.organization_members (organization_id, user_id, role)
+  select '<org id>', id, 'inspector' from auth.users where email = 'inspector@example.gov';
+```
+
 ### Build chunking
 
 `vite.config.ts` splits these into separate chunks: `tensorflow`, `mapbox`, `three`, and a `vendor` chunk for react/router/zustand. Keep heavy libraries out of shared modules that are eagerly imported.
@@ -90,5 +106,6 @@ Supabase row shapes use `snake_case` (`src/shared/types/database.ts`); domain ty
 ## Notes
 
 - Docs live in `docs/`: `TEST_PLAN.md` (end-user tests), `SBOM.md` (dependencies/licenses/data sources — includes the unresolved Ultralytics AGPL flag on both YOLO model artifacts), and `TAXONOMY.md` (the proposal unifying the detector's 19 object classes with the 11 hazard-condition tags — read before merging labeled data or training).
+- `supabase/tests/run-rls-tests.sh` runs every `*_rls.sql` against all migrations (needs Docker running).
 - `nul` in repo root is a stray Windows artifact (likely a `> nul` redirect on the wrong platform) — safe to ignore/delete.
 - `src/lib/` is aliased as `@lib` but does not exist yet.

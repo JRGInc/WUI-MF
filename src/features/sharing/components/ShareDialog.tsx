@@ -1,4 +1,4 @@
-import { useState, Fragment } from 'react';
+import { useEffect, useState, Fragment } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
 import { v4 as uuidv4 } from 'uuid';
 import {
@@ -12,19 +12,44 @@ import {
 } from '@heroicons/react/24/outline';
 import { supabase } from '@/shared/services/supabaseClient';
 import { showSuccessToast, showErrorToast } from '@/shared/stores/toastStore';
-import type { ShareType } from '@/shared/types';
+import { useAuth } from '@/app/providers/AuthProvider';
+import { useOrganizations } from '@/features/organizations/hooks/useOrganizations';
+import {
+  fetchSubmissions,
+  submitAssessment,
+  withdrawSubmission,
+} from '@/features/organizations/organizationsService';
+import {
+  ORGANIZATION_KIND_LABELS,
+  submissionChoices,
+} from '@/features/organizations/organizations';
+import type { AssessmentSubmission, ShareType } from '@/shared/types';
 
 interface ShareDialogProps {
   assessmentId: string;
+  /** The assessment's state, to list in-state organizations first. */
+  stateCode?: string;
   onClose: () => void;
 }
 
-export function ShareDialog({ assessmentId, onClose }: ShareDialogProps) {
+export function ShareDialog({ assessmentId, stateCode, onClose }: ShareDialogProps) {
   const [activeTab, setActiveTab] = useState<ShareType>('link');
   const [email, setEmail] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [shareLink, setShareLink] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const { user } = useAuth();
+  const organizations = useOrganizations(activeTab === 'agency');
+  const [submissions, setSubmissions] = useState<AssessmentSubmission[]>([]);
+  const [selectedOrgId, setSelectedOrgId] = useState('');
+  const choices = submissionChoices(organizations, submissions, stateCode);
+
+  useEffect(() => {
+    if (activeTab !== 'agency') return;
+    fetchSubmissions(assessmentId)
+      .then(setSubmissions)
+      .catch((error) => console.error('Error loading submissions:', error));
+  }, [activeTab, assessmentId]);
 
   const generateShareLink = async () => {
     setIsLoading(true);
@@ -91,27 +116,39 @@ export function ShareDialog({ assessmentId, onClose }: ShareDialogProps) {
     }
   };
 
+  // Agency submission: an assessment_submissions row, NOT a shared_reports
+  // row — a share link makes the report public; a submission only lets that
+  // organization's members read it and verify completed mitigations.
   const submitToAgency = async () => {
+    if (!user || !selectedOrgId) return;
     setIsLoading(true);
     try {
-      const accessToken = uuidv4();
-
-      const { error } = await supabase.from('shared_reports').insert({
-        assessment_id: assessmentId,
-        share_type: 'agency',
-        access_token: accessToken,
-        expires_at: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString(),
-      });
-
-      if (error) throw error;
-
-      showSuccessToast(
-        'Submitted to Agency',
-        'Your assessment has been submitted for review'
-      );
+      const submission = await submitAssessment(assessmentId, selectedOrgId, user.id);
+      setSubmissions((prev) => [...prev, submission]);
+      setSelectedOrgId('');
+      const name = organizations.find((o) => o.id === selectedOrgId)?.name ?? 'the agency';
+      showSuccessToast('Submitted', `${name} can now review this assessment`);
     } catch (error) {
       console.error('Error submitting to agency:', error);
-      showErrorToast('Failed to submit');
+      // FK violation: the assessment hasn't synced to the server yet.
+      const code = (error as { code?: string }).code;
+      showErrorToast(
+        'Failed to submit',
+        code === '23503' ? 'Sync this assessment first, then try again.' : undefined
+      );
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const withdraw = async (submission: AssessmentSubmission) => {
+    setIsLoading(true);
+    try {
+      await withdrawSubmission(submission.id);
+      setSubmissions((prev) => prev.filter((s) => s.id !== submission.id));
+    } catch (error) {
+      console.error('Error withdrawing submission:', error);
+      showErrorToast('Failed to withdraw');
     } finally {
       setIsLoading(false);
     }
@@ -275,6 +312,57 @@ export function ShareDialog({ assessmentId, onClose }: ShareDialogProps) {
                       verification. They may contact you for additional information.
                     </p>
 
+                    {submissions.length > 0 && (
+                      <ul className="space-y-2">
+                        {submissions.map((s) => (
+                          <li
+                            key={s.id}
+                            className="flex items-center justify-between text-sm rounded-lg bg-gray-50 dark:bg-gray-700/50 px-3 py-2"
+                          >
+                            <span className="text-gray-900 dark:text-white">
+                              {organizations.find((o) => o.id === s.organizationId)?.name ?? 'Organization'}
+                              <span className="ml-2 text-gray-500 dark:text-gray-400">
+                                submitted {new Date(s.submittedAt).toLocaleDateString()}
+                              </span>
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => withdraw(s)}
+                              disabled={isLoading}
+                              className="text-gray-500 hover:text-red-700 dark:text-gray-400"
+                            >
+                              Withdraw
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+
+                    <div>
+                      <label
+                        htmlFor="agency-select"
+                        className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
+                      >
+                        Agency
+                      </label>
+                      <select
+                        id="agency-select"
+                        className="input w-full"
+                        value={selectedOrgId}
+                        onChange={(e) => setSelectedOrgId(e.target.value)}
+                      >
+                        <option value="">
+                          {choices.length === 0 ? 'No agencies available yet' : 'Choose an agency…'}
+                        </option>
+                        {choices.map((o) => (
+                          <option key={o.id} value={o.id}>
+                            {o.name} ({ORGANIZATION_KIND_LABELS[o.kind]}
+                            {o.stateCode ? `, ${o.stateCode}` : ''})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
                     <div className="rounded-lg border border-gray-200 dark:border-gray-700 p-4">
                       <h4 className="font-medium text-gray-900 dark:text-white mb-2">
                         What happens next?
@@ -284,26 +372,26 @@ export function ShareDialog({ assessmentId, onClose }: ShareDialogProps) {
                           <span className="w-5 h-5 rounded-full bg-fire-100 dark:bg-fire-900/30 text-fire-600 flex items-center justify-center text-xs flex-shrink-0 mt-0.5">
                             1
                           </span>
-                          Your assessment is sent to the local fire agency
+                          The agency you choose can view this assessment (it is not made public)
                         </li>
                         <li className="flex items-start gap-2">
                           <span className="w-5 h-5 rounded-full bg-fire-100 dark:bg-fire-900/30 text-fire-600 flex items-center justify-center text-xs flex-shrink-0 mt-0.5">
                             2
                           </span>
-                          They review and may schedule an inspection
+                          They review it and may schedule an inspection
                         </li>
                         <li className="flex items-start gap-2">
                           <span className="w-5 h-5 rounded-full bg-fire-100 dark:bg-fire-900/30 text-fire-600 flex items-center justify-center text-xs flex-shrink-0 mt-0.5">
                             3
                           </span>
-                          You receive feedback and recommendations
+                          Completed items they confirm show as Verified
                         </li>
                       </ul>
                     </div>
 
                     <button
                       onClick={submitToAgency}
-                      disabled={isLoading}
+                      disabled={isLoading || !selectedOrgId}
                       className="btn-primary w-full flex items-center justify-center gap-2"
                     >
                       {isLoading ? (
