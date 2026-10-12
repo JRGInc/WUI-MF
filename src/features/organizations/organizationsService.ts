@@ -66,42 +66,6 @@ export async function withdrawSubmission(submissionId: string): Promise<void> {
   if (error) throw error;
 }
 
-export interface ReviewQueueItem {
-  submission: AssessmentSubmission;
-  organizationName: string;
-  address?: string;
-  overallScore?: number;
-  assessmentStatus?: string;
-}
-
-/** Assessments submitted to any organization the user belongs to, newest first. */
-export async function fetchReviewQueue(organizationIds: string[]): Promise<ReviewQueueItem[]> {
-  if (organizationIds.length === 0) return [];
-  const { data, error } = await supabase
-    .from('assessment_submissions')
-    .select('*, organizations(name), assessments(overall_score, status, properties(address))')
-    .in('organization_id', organizationIds)
-    .order('submitted_at', { ascending: false });
-  if (error) throw error;
-  return (data ?? []).map((r) => {
-    const row = r as Record<string, unknown> & {
-      organizations: { name: string } | null;
-      assessments: {
-        overall_score: number | null;
-        status: string | null;
-        properties: { address: string | null } | null;
-      } | null;
-    };
-    return {
-      submission: submissionFromRow(row),
-      organizationName: row.organizations?.name ?? '',
-      address: row.assessments?.properties?.address ?? undefined,
-      overallScore: row.assessments?.overall_score ?? undefined,
-      assessmentStatus: row.assessments?.status ?? undefined,
-    };
-  });
-}
-
 export async function verifyMitigation(
   actionId: string,
   organizationId: string,
@@ -122,4 +86,67 @@ export async function revokeVerification(actionId: string): Promise<MitigationAc
   });
   if (error) throw new VerificationError(verificationErrorMessage(error));
   return mitigationFromRow(data as Record<string, unknown>);
+}
+
+export interface AgencyDashboardRow {
+  submissionId: string;
+  assessmentId: string;
+  submissionStatus: AssessmentSubmission['status'];
+  submittedAt: string;
+  statusChangedAt?: string;
+  address: string;
+  parcelId?: string;
+  latitude?: number;
+  longitude?: number;
+  overallScore?: number;
+  assessmentCompletedAt?: string;
+  recommendationsTotal: number;
+  immediateTotal: number;
+  planned: number;
+  inProgress: number;
+  /** Completed and not (yet) verified. */
+  completed: number;
+  verified: number;
+  immediateOutstanding: number;
+}
+
+/** One row per assessment submitted to the org (RLS decides visibility). */
+export async function fetchAgencyDashboard(organizationId: string): Promise<AgencyDashboardRow[]> {
+  const { data, error } = await supabase.rpc('agency_dashboard', {
+    p_organization_id: organizationId,
+  });
+  if (error) throw error;
+  const num = (v: unknown) => (v === null || v === undefined ? undefined : Number(v));
+  return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
+    submissionId: r.submission_id as string,
+    assessmentId: r.assessment_id as string,
+    submissionStatus: r.submission_status as AssessmentSubmission['status'],
+    submittedAt: r.submitted_at as string,
+    statusChangedAt: (r.status_changed_at as string | null) ?? undefined,
+    address: r.address as string,
+    parcelId: (r.parcel_id as string | null) ?? undefined,
+    latitude: num(r.latitude),
+    longitude: num(r.longitude),
+    overallScore: num(r.overall_score),
+    assessmentCompletedAt: (r.assessment_completed_at as string | null) ?? undefined,
+    recommendationsTotal: Number(r.recommendations_total),
+    immediateTotal: Number(r.immediate_total),
+    planned: Number(r.planned),
+    inProgress: Number(r.in_progress),
+    completed: Number(r.completed),
+    verified: Number(r.verified),
+    immediateOutstanding: Number(r.immediate_outstanding),
+  }));
+}
+
+export async function setSubmissionStatus(
+  submissionId: string,
+  status: AssessmentSubmission['status']
+): Promise<AssessmentSubmission> {
+  const { data, error } = await supabase.rpc('set_submission_status', {
+    p_submission_id: submissionId,
+    p_status: status,
+  });
+  if (error) throw new VerificationError(verificationErrorMessage(error));
+  return submissionFromRow(data as Record<string, unknown>);
 }

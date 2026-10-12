@@ -19,27 +19,38 @@ function membershipsFor(userId: string): Promise<OrganizationMembership[]> {
   return cache.promise;
 }
 
-/** The signed-in user's organization memberships ([] when none or offline). */
-export function useMyMemberships(): OrganizationMembership[] {
+/** The signed-in user's organization memberships, and whether they have loaded. */
+export function useMyMembershipsState(): { memberships: OrganizationMembership[]; loaded: boolean } {
   const { user } = useAuth();
   const userId = user?.id;
-  const [memberships, setMemberships] = useState<OrganizationMembership[]>([]);
+  const [state, setState] = useState<{ memberships: OrganizationMembership[]; loaded: boolean }>({
+    memberships: [],
+    loaded: false,
+  });
 
   useEffect(() => {
     if (!userId) {
-      setMemberships([]);
+      setState({ memberships: [], loaded: true });
       return;
     }
     let cancelled = false;
     membershipsFor(userId)
       .then((m) => {
-        if (!cancelled) setMemberships(m);
+        if (!cancelled) setState({ memberships: m, loaded: true });
       })
-      .catch((error) => console.error('Could not load organization memberships:', error));
+      .catch((error) => {
+        console.error('Could not load organization memberships:', error);
+        if (!cancelled) setState({ memberships: [], loaded: true });
+      });
     return () => {
       cancelled = true;
     };
   }, [userId]);
 
-  return memberships;
+  return state;
+}
+
+/** The signed-in user's organization memberships ([] when none, offline, or still loading). */
+export function useMyMemberships(): OrganizationMembership[] {
+  return useMyMembershipsState().memberships;
 }

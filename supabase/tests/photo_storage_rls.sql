@@ -1,7 +1,7 @@
 -- RLS tests for assessment-photos Storage objects
 -- (20261012120000_photo_storage_owner_scoped.sql). Each check prints PASS or
 -- FAIL. ERROR lines are expected: they are the writes the policies reject.
--- Runs in its own psql session after the other *_rls.sql files; ids are distinct.
+-- Runs in its own fresh database (see run-rls-tests.sh).
 \set ON_ERROR_STOP 0
 
 -- ── Fixtures (as superuser) ──

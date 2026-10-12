@@ -253,7 +253,7 @@ Needs a provisioned organization and an inspector account (see CLAUDE.md, "Organ
 |---|---|---|---|
 | VER-01 | Submit to an agency | As the homeowner, open a synced assessment → Share → **Agency**, pick the organization, **Submit to Fire Agency**. | Toast "Submitted"; the organization is listed under the picker with a submit date and is removed from the picker. In-state organizations are listed first. |
 | VER-02 | Submission is not public | After VER-01, open `/assessment/<id>` signed in as an unrelated third account, and query the assessment while signed out. | Not found / no access. An agency submission does not create a public share link. |
-| VER-03 | Inspector sees the queue | Sign in as the inspector. | An **Inspections** nav item appears (hidden for accounts with no organization). It lists the submitted assessment with address, date and score. |
+| VER-03 | Inspector sees the dashboard | Sign in as the inspector. | An **Inspections** nav item appears (hidden for accounts with no organization). The dashboard lists the submitted assessment with address, progress and submit date. |
 | VER-04 | Read-only review | Open the assessment from Inspections. | Report renders with a "Reviewing for <org>" chip; no Share/Edit, no map/AR shortcuts, no owner status buttons. |
 | VER-05 | Verify a completed item | On an item the owner marked **Done**, tap **Verify**, add an optional note, **Confirm verification**. | Toast "Verified"; the item shows the Verified badge, "Verified <date> by <org>", and the inspector note. Items not marked Done have no Verify button. |
 | VER-06 | Owner sees the verification | As the homeowner, reload the report (online), then go offline and reload. | The item shows Verified by <org> with the note, and its controls are locked. Still verified offline. |
@@ -263,6 +263,24 @@ Needs a provisioned organization and an inspector account (see CLAUDE.md, "Organ
 | VER-10 | Own property | As an inspector, submit **your own** assessment to your org and try to verify one of its Done items. | Error toast: "You cannot verify mitigation on your own property". |
 | VER-11 | Offline inspector | As the inspector, go offline on a review. | Verify/Revoke are disabled with a "Connect to the internet to verify" hint. |
 | VER-12 | Withdraw | As the homeowner, Share → Agency → **Withdraw**. | The submission disappears; the inspector can no longer open the assessment. |
+
+---
+
+## 13b. Agency dashboard
+
+Same setup as 13a. Use at least two submitted assessments from different homeowners, one with a property location and one without.
+
+| ID | Test | Steps | Expected |
+|---|---|---|---|
+| AGY-01 | Rollups | Open **Inspections** as the inspector. | Tiles show the property count (with new / in-review counts), % of mitigations done (*x of y*), verified, awaiting verification, and immediate outstanding. The numbers match the individual reports' progress bars. |
+| AGY-02 | Map | Look at the map. | One point per located property, coloured by progress (red not started, amber under way, blue all done, green all verified); the map fits the points. Hover shows address and *done/total*. A note counts properties with no location. Works in dark mode. |
+| AGY-03 | Map click-through | Click a point. | Opens that assessment's read-only review. |
+| AGY-04 | Progress filter | Tap a progress chip (e.g. **Under way**). | The map and the list both show only properties in that band; the counts on the chips match. |
+| AGY-05 | Review status | As the inspector, **Start review** on a new submission, then **Close**, then **Reopen**. | The status pill updates each time (New → In review → Closed → In review); the status filter counts update. Survives a reload. |
+| AGY-06 | Viewer role | Open the dashboard as a **viewer**. | Same rollups, map and list; no status buttons. |
+| AGY-07 | Progress reflects verification | Verify an item on one property (VER-05), then return to the dashboard. | Verified +1 and awaiting verification −1; that property's colour changes when all of its items are verified. |
+| AGY-08 | Multiple organizations | Use an account in two organizations. | An organization picker appears; switching reloads the rollups, map and list for that organization only. |
+| AGY-09 | Offline | Go offline on the dashboard. | An offline notice shows; status buttons are disabled. |
 
 ---
 

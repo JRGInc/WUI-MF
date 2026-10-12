@@ -2,9 +2,8 @@
 -- assessment submissions, and inspector verification of mitigation actions.
 -- Each check prints PASS or FAIL. ERROR lines are expected: they are the
 -- writes and calls the policies/functions reject.
--- Run with supabase/tests/run-rls-tests.sh (needs Docker). Runs after
--- mitigation_actions_rls.sql in the same database, so every id here is
--- distinct and every count is scoped to these fixtures.
+-- Run with supabase/tests/run-rls-tests.sh (needs Docker). Runs in its own
+-- fresh database (see run-rls-tests.sh).
 \set ON_ERROR_STOP 0
 
 -- ── Fixtures (as superuser) ──

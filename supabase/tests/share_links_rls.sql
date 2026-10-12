@@ -2,7 +2,7 @@
 -- (20261012110000_share_token_bound_reads.sql). Each check prints PASS or FAIL.
 -- The shared view sends its token in the x-share-token header; PostgREST
 -- exposes headers as the request.headers GUC, simulated here with set_config.
--- Runs in its own psql session after the other *_rls.sql files; ids are distinct.
+-- Runs in its own fresh database (see run-rls-tests.sh).
 \set ON_ERROR_STOP 0
 
 -- ── Fixtures (as superuser): two owners, each with one shared assessment ──
