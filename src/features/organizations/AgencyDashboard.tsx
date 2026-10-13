@@ -31,6 +31,7 @@ import {
   type ProgressBand,
 } from './agencyRollup';
 import { AgencyMap } from './components/AgencyMap';
+import { FireExposurePanel } from './components/FireExposurePanel';
 import { actionsCsv, propertiesCsv, propertiesGeoJson } from './exports';
 
 type Status = AssessmentSubmission['status'];
@@ -308,6 +309,16 @@ export default function AgencyDashboard() {
               </p>
             )}
           </div>
+
+          {membership && (
+            <FireExposurePanel
+              organizationId={membership.organization.id}
+              organizationName={membership.organization.name}
+              rows={rows}
+              canRecord={canAct}
+              isOnline={isOnline}
+            />
+          )}
 
           {/* List */}
           <div className="card">

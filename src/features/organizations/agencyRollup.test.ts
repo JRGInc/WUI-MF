@@ -1,6 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import type { AgencyDashboardRow } from './organizationsService';
-import { agencyRollup, dashboardFeatures, hasLocation, progressBand } from './agencyRollup';
+import type { AgencyDashboardRow, FireExposure } from './organizationsService';
+import {
+  agencyRollup,
+  dashboardFeatures,
+  exposureSummary,
+  hasLocation,
+  progressBand,
+} from './agencyRollup';
 
 function row(over: Partial<AgencyDashboardRow> = {}): AgencyDashboardRow {
   return {
@@ -77,5 +83,32 @@ describe('dashboardFeatures', () => {
     expect(fc.features).toHaveLength(1);
     expect(fc.features[0].geometry.coordinates).toEqual([-116.2, 43.6]);
     expect(fc.features[0].properties).toMatchObject({ band: 'verified', done: 4, total: 4 });
+  });
+});
+
+describe('exposureSummary', () => {
+  const base: FireExposure = {
+    id: 'e1',
+    organizationId: 'o1',
+    assessmentId: 'a1',
+    incidentId: 'f1',
+    incidentName: 'Fire 1',
+    discoveredAt: '2026-08-01T00:00:00.000Z',
+    relation: 'near',
+    source: 'wfigs_ytd',
+    recommendationsTotal: 3,
+    doneAtStart: 3,
+    verifiedAtStart: 1,
+    immediateOutstandingAtStart: 0,
+    detectedAt: '2026-08-02T00:00:00.000Z',
+  };
+  it('counts properties once, judged at their earliest fire', () => {
+    const s = exposureSummary([
+      base,
+      { ...base, id: 'e2', incidentId: 'f2', relation: 'inside', discoveredAt: '2026-09-01T00:00:00.000Z', doneAtStart: 0 },
+      { ...base, id: 'e3', assessmentId: 'a2', incidentId: 'f2', doneAtStart: 1, verifiedAtStart: 3 },
+      { ...base, id: 'e4', assessmentId: 'a3', recommendationsTotal: 0, doneAtStart: 0, verifiedAtStart: 0 },
+    ]);
+    expect(s).toEqual({ properties: 3, inside: 1, fullyDoneAtStart: 1, fullyVerifiedAtStart: 1, fires: 2 });
   });
 });

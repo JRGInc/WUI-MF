@@ -1,4 +1,4 @@
-import type { AgencyDashboardRow, AgencyExportRow } from './organizationsService';
+import type { AgencyDashboardRow, AgencyExportRow, FireExposure } from './organizationsService';
 import { hasLocation, PROGRESS_BAND_LABELS, progressBand } from './agencyRollup';
 
 // Pure export builders (no DOM), so they are unit-testable. Field names are
@@ -149,5 +149,49 @@ export function propertiesGeoJson(
     },
     null,
     2
+  );
+}
+
+export const EXPOSURE_COLUMNS = [
+  'address',
+  'parcel_id',
+  'fire',
+  'incident_id',
+  'discovered_on',
+  'acres',
+  'relation',
+  'recommendations',
+  'done_at_fire_start',
+  'verified_at_fire_start',
+  'immediate_open_at_fire_start',
+  'source',
+  'detected_on',
+  'assessment_id',
+];
+
+/**
+ * One row per (property, fire). done_at_fire_start is owner-reported;
+ * verified_at_fire_start is inspector-verified (server-stamped).
+ */
+export function exposuresCsv(exposures: FireExposure[], rows: AgencyDashboardRow[]): string {
+  const byAssessment = new Map(rows.map((r) => [r.assessmentId, r]));
+  return toCsv(
+    EXPOSURE_COLUMNS,
+    exposures.map((e) => [
+      byAssessment.get(e.assessmentId)?.address,
+      byAssessment.get(e.assessmentId)?.parcelId,
+      e.incidentName,
+      e.incidentId,
+      date(e.discoveredAt),
+      e.acres,
+      e.relation,
+      e.recommendationsTotal,
+      e.doneAtStart,
+      e.verifiedAtStart,
+      e.immediateOutstandingAtStart,
+      e.source,
+      date(e.detectedAt),
+      e.assessmentId,
+    ])
   );
 }

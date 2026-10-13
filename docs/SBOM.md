@@ -103,5 +103,6 @@ sources below are free and public-domain / open unless noted.
 | Supabase | Auth, Postgres (RLS), Storage | Your Supabase plan |
 | CAL FIRE (FRAP) FeatureServer | Fire History in California | Public / open data |
 | NIFC InterAgencyFirePerimeterHistory | Fire History nationally | Public / open data |
+| NIFC WFIGS Interagency Perimeters (Year to Date) | Agency dashboard fire-exposure check (current-year wildfire perimeters, discovery dates) | Public / open data |
 | LANDFIRE WMS (USGS/USFS) | Vegetation / fuel raster | Public domain |
 | USGS 3DEP ImageServer | Slope analysis raster | Public domain |

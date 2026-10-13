@@ -197,3 +197,72 @@ export async function fetchAgencyExport(organizationId: string): Promise<AgencyE
     verificationNote: opt(r.verification_note),
   }));
 }
+
+export interface FireExposure {
+  id: string;
+  organizationId: string;
+  assessmentId: string;
+  incidentId: string;
+  incidentName: string;
+  discoveredAt?: string;
+  acres?: number;
+  relation: 'inside' | 'near';
+  source: string;
+  recommendationsTotal: number;
+  /** Done (self-reported completion, or verified) by the fire's discovery. */
+  doneAtStart: number;
+  /** Verified (server-stamped) by the fire's discovery. */
+  verifiedAtStart: number;
+  immediateOutstandingAtStart: number;
+  detectedAt: string;
+}
+
+function exposureFromRow(r: Record<string, unknown>): FireExposure {
+  const opt = (v: unknown) => (v === null || v === undefined ? undefined : v);
+  return {
+    id: r.id as string,
+    organizationId: r.organization_id as string,
+    assessmentId: r.assessment_id as string,
+    incidentId: r.incident_id as string,
+    incidentName: r.incident_name as string,
+    discoveredAt: opt(r.discovered_at) as string | undefined,
+    acres: opt(r.acres) === undefined ? undefined : Number(r.acres),
+    relation: r.relation as 'inside' | 'near',
+    source: r.source as string,
+    recommendationsTotal: Number(r.recommendations_total),
+    doneAtStart: Number(r.done_at_start),
+    verifiedAtStart: Number(r.verified_at_start),
+    immediateOutstandingAtStart: Number(r.immediate_outstanding_at_start),
+    detectedAt: r.detected_at as string,
+  };
+}
+
+export async function fetchFireExposures(organizationId: string): Promise<FireExposure[]> {
+  const { data, error } = await supabase
+    .from('fire_exposures')
+    .select('*')
+    .eq('organization_id', organizationId)
+    .order('discovered_at', { ascending: false });
+  if (error) throw error;
+  return (data ?? []).map((r) => exposureFromRow(r as Record<string, unknown>));
+}
+
+/** Record one exposure; the server computes the mitigation snapshot. */
+export async function recordFireExposure(
+  organizationId: string,
+  hit: { assessmentId: string; relation: 'inside' | 'near'; fire: { incidentId: string; incidentName: string; discoveredAt?: string; acres?: number } },
+  source: string
+): Promise<FireExposure> {
+  const { data, error } = await supabase.rpc('record_fire_exposure', {
+    p_organization_id: organizationId,
+    p_assessment_id: hit.assessmentId,
+    p_incident_id: hit.fire.incidentId,
+    p_incident_name: hit.fire.incidentName,
+    p_discovered_at: hit.fire.discoveredAt ?? null,
+    p_acres: hit.fire.acres ?? null,
+    p_relation: hit.relation,
+    p_source: source,
+  });
+  if (error) throw error;
+  return exposureFromRow(data as Record<string, unknown>);
+}

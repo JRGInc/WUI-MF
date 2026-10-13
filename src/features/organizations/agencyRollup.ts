@@ -1,4 +1,4 @@
-import type { AgencyDashboardRow } from './organizationsService';
+import type { AgencyDashboardRow, FireExposure } from './organizationsService';
 
 // Pure agency-dashboard logic (no Supabase/Mapbox), so it is unit-testable.
 
@@ -108,5 +108,45 @@ export function dashboardFeatures(
         total: row.recommendationsTotal,
       },
     })),
+  };
+}
+
+export interface ExposureSummary {
+  /** Distinct properties with at least one exposure. */
+  properties: number;
+  /** Distinct properties a perimeter reached (inside). */
+  inside: number;
+  /** Of exposed properties: every recommendation done at their (earliest) fire's start. */
+  fullyDoneAtStart: number;
+  /** Of exposed properties: every recommendation inspector-verified at their (earliest) fire's start. */
+  fullyVerifiedAtStart: number;
+  fires: number;
+}
+
+/**
+ * Exposure rollup per property, judged at the property's earliest fire (the
+ * first test of its mitigation). Properties with no recommendations don't
+ * count as fully done.
+ */
+export function exposureSummary(exposures: FireExposure[]): ExposureSummary {
+  const earliest = new Map<string, FireExposure>();
+  const inside = new Set<string>();
+  for (const e of exposures) {
+    if (e.relation === 'inside') inside.add(e.assessmentId);
+    const prev = earliest.get(e.assessmentId);
+    if (!prev || (e.discoveredAt ?? '') < (prev.discoveredAt ?? '')) earliest.set(e.assessmentId, e);
+  }
+  let fullyDone = 0;
+  let fullyVerified = 0;
+  for (const e of earliest.values()) {
+    if (e.recommendationsTotal > 0 && e.doneAtStart === e.recommendationsTotal) fullyDone++;
+    if (e.recommendationsTotal > 0 && e.verifiedAtStart === e.recommendationsTotal) fullyVerified++;
+  }
+  return {
+    properties: earliest.size,
+    inside: inside.size,
+    fullyDoneAtStart: fullyDone,
+    fullyVerifiedAtStart: fullyVerified,
+    fires: new Set(exposures.map((e) => e.incidentId)).size,
   };
 }

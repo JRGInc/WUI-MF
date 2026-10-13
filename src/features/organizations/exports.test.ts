@@ -1,9 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import type { AgencyDashboardRow, AgencyExportRow } from './organizationsService';
+import type { AgencyDashboardRow, AgencyExportRow, FireExposure } from './organizationsService';
 import {
   ACTION_COLUMNS,
   actionsCsv,
   csvCell,
+  EXPOSURE_COLUMNS,
+  exposuresCsv,
   PROPERTY_COLUMNS,
   propertiesCsv,
   propertiesGeoJson,
@@ -128,5 +130,31 @@ describe('propertiesGeoJson', () => {
     expect(gj.features[0].geometry).toEqual({ type: 'Point', coordinates: [-116.2, 43.6] });
     expect(gj.features[0].properties).toMatchObject({ address: row.address, verified: 1, percent_done: 40 });
     expect(gj.features[0].properties).not.toHaveProperty('latitude');
+  });
+});
+
+describe('exposuresCsv', () => {
+  it('writes one row per property and fire, joined to the address', () => {
+    const e: FireExposure = {
+      id: 'e1',
+      organizationId: 'o1',
+      assessmentId: 'a1',
+      incidentId: '{IRWIN}',
+      incidentName: 'Big Grass',
+      discoveredAt: '2026-07-23T21:30:00.000Z',
+      acres: 575163,
+      relation: 'inside',
+      source: 'wfigs_ytd',
+      recommendationsTotal: 5,
+      doneAtStart: 2,
+      verifiedAtStart: 1,
+      immediateOutstandingAtStart: 1,
+      detectedAt: '2026-10-13T12:00:00.000Z',
+    };
+    const [header, first] = lines(exposuresCsv([e], [row]));
+    expect(header).toBe(EXPOSURE_COLUMNS.join(','));
+    expect(first).toBe(
+      '"12 Main St, Boise, ID",R123,Big Grass,{IRWIN},2026-07-23,575163,inside,5,2,1,1,wfigs_ytd,2026-10-13,a1'
+    );
   });
 });

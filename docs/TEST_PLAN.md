@@ -299,6 +299,22 @@ Same setup as 13a. Use at least two submitted assessments from different homeown
 
 ---
 
+## 13d. Fire exposure
+
+Needs a submitted property whose location is inside or within 1 km of a 2026 wildfire perimeter. Set the property's coordinates on a known fire (e.g. from the NIFC WFIGS map) if no real one is affected. Also have one property far from any fire.
+
+| ID | Test | Steps | Expected |
+|---|---|---|---|
+| FIRE-01 | Run the check | As an inspector, on the agency dashboard's **Fire exposure** card, **Check against fire perimeters**. | The button shows *Checking n/N* progress, then a toast. The exposed property is listed as **Inside** or **Within 1 km** with the fire's name, discovery date and acres. The far property is not listed. |
+| FIRE-02 | Snapshot at fire start | For the exposed property, compare *At fire start: d/t done, v verified* with the items' completed/verified dates. | Only items done (or verified) before the fire's discovery date count. |
+| FIRE-03 | No backdating | After FIRE-01, mark another item on that property Done and run the check again. | The snapshot does not change. Only the relation can upgrade (near → inside). |
+| FIRE-04 | Tiles | Look at the four tiles. | Properties exposed / reached / fully done / fully verified at fire start match the list. |
+| FIRE-05 | Viewer and owner | Open the dashboard as a **viewer**; also check the owner can't see other owners' exposures. | The viewer sees recorded exposures but no check button. |
+| FIRE-06 | Exposures CSV | **Exposures (CSV)**. | One row per property and fire, with address, fire, discovery date, relation and the at-start counts. |
+| FIRE-07 | Offline / service down | Go offline (or block arcgis.com) and run the check. | The button is disabled offline. If the service fails mid-check, the failures are counted with a "run the check again" note; recorded hits are kept. |
+
+---
+
 ## 14. PWA, performance & cross-cutting
 
 | ID | Test | Steps | Expected |

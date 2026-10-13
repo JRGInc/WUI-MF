@@ -94,6 +94,16 @@ Exports and printing (WFCA C5-2 "support grant reporting"):
   - Use Tailwind `print:` variants to hide chrome; `Layout` already hides the sidebar and top bar.
   - `AgencyMap` sets `preserveDrawingBuffer` so the map canvas prints.
 
+Fire exposure (WFCA C5-2 KSA-7, effectiveness monitoring):
+- **The check runs on demand:** inspectors and admins click it in the dashboard (`components/FireExposurePanel.tsx`). Nothing schedules it.
+- **Querying:** `fireCheck.ts` asks NIFC's WFIGS year-to-date perimeters, from the browser, which wildfires contain each located property or lie within 1 km. Prescribed burns are excluded.
+- **Recording:** hits are written only through `record_fire_exposure()` (migration `20261013110000`). It snapshots the mitigation **as of the fire's discovery**:
+  - `verified_at_start` uses server-stamped `verified_at`, so it is trustworthy;
+  - `done_at_start` uses the owner's `completed_at`, so it is self-reported;
+  - the snapshot is written once and never recomputed, so marking items done after a fire can't improve the record;
+  - re-detection only upgrades near → inside.
+- **Why store results:** the YTD service resets every January.
+
 Provision an organization and inspector (SQL editor / service role):
 
 ```sql
