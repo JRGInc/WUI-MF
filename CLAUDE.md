@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-`wildfire-risk-assessment` — a PWA (Vite + React 18 + TypeScript) for assessing wildfire risk on a property. Mobile-first, designed to work offline in the field and sync back to Supabase when a connection returns. Uses Mapbox GL for mapping, TensorFlow.js for on-device computer vision, and Three.js / WebXR for an AR viewer.
+`wildfire-risk-assessment` — a PWA (Vite + React 18 + TypeScript) for assessing wildfire risk on a property. Mobile-first, designed to work offline in the field and sync back to Supabase when a connection returns. Uses Mapbox GL for mapping, onnxruntime-web + TensorFlow.js for on-device computer vision, and Three.js / WebXR for an AR viewer. Beyond the homeowner assessment, it implements WFCA Phase 2 C5-2 for fire agencies: mitigation tracking, organizations with inspector verification, an agency dashboard, grant-reporting exports, and fire-exposure monitoring. See the Mitigation tracking and Organizations sections below, and the README.
 
 ## Commands
 
@@ -45,11 +45,11 @@ All routes live in `src/app/App.tsx`. Public: `/login`, `/register`, `/report/:t
 
 The app is built around the assumption that the user is often offline in the field. Key pieces:
 
-- **Dexie (IndexedDB)** is the source of truth while offline. `src/shared/services/offlineStorage.ts` defines the `WildfireRiskDB` schema (properties, assessments, photos with `Blob`s, annotations, training progress, sync queue, cached ML models, cached training content).
+- **Dexie (IndexedDB)** is the source of truth while offline. `src/shared/services/offlineStorage.ts` defines the `WildfireRiskDB` schema (properties, assessments, photos with `Blob`s, annotations, training progress, sync queue, cached training content, analytics events, mitigation actions). Current version is **v5**: v4 dropped the never-used `cachedModels` table, and v5 added `mitigationActions`. The order matters, because production devices passed through v4 first. Dexie deletes any table a version step doesn't declare, so never reorder or rewrite past versions; append a new one.
 - **Sync queue pattern**: writes go through `saveXLocally()` / `updateXLocally()` helpers, which both update Dexie and `queueSyncOperation()` an entry into `syncQueue`. Reads come straight from Dexie.
 - **OfflineProvider** (`src/app/providers/OfflineProvider.tsx`) watches `navigator.onLine`, polls the queue every 5s, exposes `useOffline()` (with `syncNow`, `queueOperation`, `pendingOperations`), and auto-flushes via `syncPendingOperations()` when the app comes back online. Each operation retries up to 5 times before being marked failed (`lastError` set, kept in queue).
 - **Photos** are stored locally as Blobs in Dexie, uploaded to Supabase Storage bucket `assessment-photos` on sync, then the blob is cleared to save space (`syncPhoto()` in `offlineStorage.ts`). Object paths must stay `<assessmentId>/<photoId>.jpg`: Storage RLS (`20261012120000_photo_storage_owner_scoped.sql`, tests in `supabase/tests/photo_storage_rls.sql`) lets only the assessment's owner write under that folder, and only the owner or a reviewer list it. Public URLs (`getPhotoUrl`) bypass RLS by design.
-- **Service worker / PWA**: configured in `vite.config.ts` via `vite-plugin-pwa`. Runtime caches: Mapbox tiles (CacheFirst, 30d), Supabase (NetworkFirst, 1d), images (CacheFirst, 30d), `.wasm`/`.tflite` model files (CacheFirst, 90d). The plugin generates `sw.js`; `main.tsx` also has a manual `navigator.serviceWorker.register('/sw.js')` call.
+- **Service worker / PWA**: configured in `vite.config.ts` via `vite-plugin-pwa`. Runtime caches: Mapbox tiles (CacheFirst, 30d), Supabase (NetworkFirst, 1d), images (CacheFirst, 30d), `model-cache` for `/ort/`, `/models/` and `.wasm`/`.tflite`/`.onnx` files (CacheFirst, 90d), and `tfjs-model-cache` for TF.js model shards (CacheFirst, 90d). The plugin generates `sw.js`; `main.tsx` also has a manual `navigator.serviceWorker.register('/sw.js')` call.
 
 When adding a new persisted entity: extend the Dexie schema (bump `version()` in `offlineStorage.ts`), add `saveXLocally` + `updateXLocally` helpers that queue sync ops, and add a case to `executeSyncOperation()` if the table name needs special handling.
 
@@ -128,7 +128,16 @@ Supabase row shapes use `snake_case` (`src/shared/types/database.ts`); domain ty
 
 ## Notes
 
-- Docs live in `docs/`: `TEST_PLAN.md` (end-user tests), `SBOM.md` (dependencies/licenses/data sources — includes the unresolved Ultralytics AGPL flag on both YOLO model artifacts), and `TAXONOMY.md` (the proposal unifying the detector's 19 object classes with the 11 hazard-condition tags — read before merging labeled data or training).
+- Docs live in `docs/`:
+  - `USER_GUIDE.md`: end-user guide, including a section for agencies and inspectors.
+  - `TEST_PLAN.md`: end-user tests. Suites 13a–13d cover verification, the dashboard, exports and fire exposure.
+  - `INSPECTION_GUIDELINES.md`: state-by-state guideline record.
+  - `SBOM.md`: dependencies, licenses and data sources. It includes the unresolved Ultralytics AGPL flag on the WUI detector weights.
+  - `TAXONOMY.md`: the proposal unifying the detector's 19 object classes with the 11 hazard-condition tags. Read it before merging labeled data or training.
+- The README has the security model, the migration list and the rollout order.
+  - New migrations are applied by hand in the Supabase SQL editor (no CLI).
+  - Additive migrations go before the deploy; behavior-changing ones go after it.
+- Placeholders that look real but aren't: the Share dialog's "send via email" creates a share link but sends nothing.
 - `supabase/tests/run-rls-tests.sh` runs every `*_rls.sql` against all migrations (needs Docker running). Each test file gets a fresh copy of a migrated template database, so fixtures never leak between files.
 - `nul` in repo root is a stray Windows artifact (likely a `> nul` redirect on the wrong platform) — safe to ignore/delete.
 - `src/lib/` is aliased as `@lib` but does not exist yet.

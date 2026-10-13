@@ -18,7 +18,8 @@ suites will appear "broken" when they're really just unconfigured.
 | Dependency | Why it matters | How to confirm |
 |---|---|---|
 | **Supabase project** (`VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`) | Auth, data, sync. Placeholder values let the UI boot but every backend call fails. | Registration/login actually work (Suite 2). |
-| **Email confirmation policy** | New users can't log in until they confirm by email, unless **autoconfirm** is on. | Supabase dashboard → Authentication → Email. For testing, enable autoconfirm or use a real inbox. |
+| **Email confirmation policy** | The app expects **autoconfirm on** (sign-up returns a live session). With it off, registration reports a failure. | Supabase dashboard → Authentication → Email: "Confirm email" disabled. |
+| **An organization + inspector** (Suites 13a–13d) | The agency features only appear for organization members. Memberships are created server-side. | Run the provisioning SQL in the README ("Organizations, roles & inspector verification") for an inspector account and a viewer account. |
 | **Mapbox token** (`VITE_MAPBOX_TOKEN`) | Risk Map and the AR↔map markers. Without it the map shows a "Map Not Configured" screen. | Map renders tiles (Suite 5). |
 | **HTTPS origin** | Camera (AR) and Geolocation (Map/AR) require a secure context. `localhost` counts; a LAN IP does **not**. | Use the production build over an HTTPS tunnel for device testing. |
 | **Two browsers/devices** | Cross-device sync (Suite 12) needs two clients signed into the same account. | — |
@@ -36,8 +37,12 @@ asks you to log in and the dashboard is pre-populated with a "Dev User," DEV_MOD
 is on — stop and switch it off before testing Suites 2, 11, 12.
 
 ### Test data to prepare
-- One **test account** (email + password ≥ 8 chars).
+- One **test account** (email + password ≥ 8 chars), the homeowner.
 - A second account (or second browser) for sharing/sync tests.
+- For the agency suites (13a–13d): an **organization** with an **inspector**
+  account and a **viewer** account, provisioned with the README SQL. Also at least
+  two submitted assessments from different homeowners, one with a location and
+  one without.
 - A property **address** with known coordinates, ideally near your physical
   location so GPS/AR can be exercised outdoors.
 
@@ -49,9 +54,9 @@ is on — stop and switch it off before testing Suites 2, 11, 12.
 |---|---|---|---|
 | AUTH-01 | Guard redirects when signed out | In a fresh browser, open `/` (or `/map`, `/settings`). | Redirected to `/login`; protected content not shown. |
 | AUTH-02 | Register — validation | On `/register`, submit with mismatched passwords, then a <8-char password. | Inline error toast for each; no account created. |
-| AUTH-03 | Register — success | Fill name/email/password, accept Terms, submit. | "Account created — check your email to verify"; routed to `/login`. A `profiles` row is created server-side (no error). |
-| AUTH-04 | Email confirmation gate | Try to log in before confirming (if autoconfirm is **off**). | Login is refused until the emailed link is clicked. (If autoconfirm on, login works immediately.) |
-| AUTH-05 | Login — success | Enter confirmed credentials. | Lands on the dashboard. |
+| AUTH-03 | Register — success | Fill name/email/password, accept Terms, submit. | "Account created — Welcome! You are now signed in."; lands on the dashboard, signed in. A `profiles` row is created server-side (no error). |
+| AUTH-04 | Register — existing email | Register again with an email that already has an account. | "Registration failed" toast; no second account; not signed in. |
+| AUTH-05 | Login — success | Enter valid credentials. | Lands on the dashboard. |
 | AUTH-06 | Login — bad credentials | Enter a wrong password. | "Login failed" toast; stays on `/login`. |
 | AUTH-07 | Return-to after login | While signed out, open `/settings`; get redirected to login; then log in. | After login you land on `/settings` (the originally requested page), not `/`. |
 | AUTH-08 | Sign out | Settings → Sign Out. | Returned to a signed-out state; protected routes redirect again. |
@@ -340,12 +345,13 @@ These are **expected** behaviors — not bugs. Don't file them.
   calibration note (BRIDGE-07), not a release blocker.
 - **WebXR geo markers are experimental:** the XR scene has no true north, so the
   alignment is approximate and drifts; non-XR overlay is the primary path.
-- **AR defensible-space zones center on where you stand:** the structure center
-  is stamped from the first GPS fix, not yet a pre-selected property; an explicit
-  "set / nudge structure" control is planned.
-- **AR zone ground height is approximate:** the ground plane is dropped a fixed
-  ~1.5 m (handheld height); the on-ground bands may sit slightly high/low on a
-  given device. The **radar HUD** is the pitch-independent, reliable view.
+- **AR zones start centered on where you stand:** the first GPS fix stamps the
+  center. Use **Center zones here** (AR-15) or **Center zones at reticle** (AR-16)
+  to move it onto the structure.
+- **AR zone ground height is approximate on the compass overlay:** bands start
+  ~1.5 m below the phone. Use **Ground ▲/▼** (AR-10a) to adjust; WebXR uses the
+  hit-tested ground instead. The **radar HUD** is the pitch-independent,
+  reliable view.
 - **iOS has no WebXR:** iPhone/iPad use the compass/GPS overlay (metres accuracy,
   some drift). WebXR (Android) is the higher-fidelity path; both draw the same
   shared zone geometry. The Android/WebXR path (AR-12) is device-only and not
@@ -354,8 +360,24 @@ These are **expected** behaviors — not bugs. Don't file them.
   the image bytes are served from Storage, not transferred device-to-device.
 - **Account deletion is request-based:** the in-app control sends an email
   request (completed within 30 days), not an instant self-service hard delete.
-- **Insurer/advertiser data sharing is not active** — disclosed as planned/future
-  in the Privacy Policy only.
+- **Insurer/advertiser data sharing is not active.** The Privacy Policy
+  discloses it as planned/future only.
+- **"Send via email" in the Share dialog does not send email.** It creates a
+  share link, but no message is delivered (no email service is wired up). Copy
+  the link instead.
+- **PDFs come from the browser's print dialog** ("Save as PDF"), so the exact
+  layout varies a little by browser.
+- **Agency features need a connection:** verifying, review-status changes,
+  exports, and the fire check. Homeowner mitigation tracking works offline.
+- **Agency map shows property points, not parcel boundaries:** there's no parcel
+  geometry. Properties without coordinates are listed but not mapped.
+- **The fire-exposure check is manual and current-year only:** someone has to run
+  it; nothing schedules it. It uses NIFC's year-to-date perimeters, so fires
+  from earlier years aren't checked, and it doesn't record whether a structure
+  survived.
+- **Photos are served from a public bucket:** only the owner can upload, change
+  or delete them, and they can't be listed. But anyone holding a photo's exact
+  URL can open it.
 
 ---
 
@@ -389,4 +411,10 @@ Run this short path to sanity-check a build before deeper testing:
 6. **OFF-03/04** create offline, reconnect, syncs
 7. **AUTH-08** sign out
 
-If all seven pass, the core path is healthy.
+If all seven pass, the core path is healthy. If agency features changed, also
+run:
+
+8. **VER-01** submit to an agency → **VER-05** inspector verifies → **VER-06**
+   owner sees it
+9. **AGY-01** dashboard rollups → **EXP-04** properties CSV → **FIRE-01** fire
+   check

@@ -9,10 +9,23 @@ connection returns.
 
 - **Stack:** Vite · React 18 · TypeScript
 - **Mapping:** Mapbox GL
-- **On-device CV:** TensorFlow.js
+- **On-device CV:** onnxruntime-web (WUI hazard detector) + TensorFlow.js (DeepLab segmentation)
 - **AR viewer:** Three.js / WebXR
 - **Offline store:** Dexie (IndexedDB) with a sync queue
-- **Backend:** Supabase (auth, Postgres + RLS, Storage)
+- **Backend:** Supabase (auth, Postgres + row-level security, Storage)
+
+**What it does:**
+- **Homeowners** assess a property against their state's wildfire guidelines,
+  get prioritized recommendations, and track mitigation progress with notes
+  and photo evidence.
+- **Fire agencies** review submitted assessments on a dashboard, and their
+  inspectors verify completed work. They export grant-reporting data and check
+  properties against current-year wildfire perimeters.
+
+This implements capability C5-2 of the
+[WFCA Phase 2 report](https://wfca.com/wp-content/uploads/2026/06/Phase-2-Report_National-Wildland-Fire-Tech-Summit_Operational-Capabilities.pdf),
+"Nationwide Integrated Mitigation Tracking"; see
+[Mitigation tracking & the agency workflow](#mitigation-tracking--the-agency-workflow).
 
 > 📖 **New here?** See the [**User Guide**](docs/USER_GUIDE.md) — an illustrated,
 > step-by-step walkthrough of how to use the app, from signing in to completing
@@ -50,12 +63,25 @@ npm run test:e2e   # playwright
 npm run deploy     # build + wrangler deploy to Cloudflare Workers (firerisk)
 
 npm run export:training   # pull training-consented photos into a YOLO dataset
+npm run import:consented  # fold exported consented photos into the labeling pool
+npm run flywheel          # export:training + import:consented (run on a schedule)
 npm run label:prepare     # build a SAM-assisted labeling bundle
 npm run import:photos     # import local photos
+npm run eval:detector     # golden-image evaluation of the WUI hazard detector
+npm run sync:ort          # re-copy the onnxruntime-web runtime into public/ort/
+
+supabase/tests/run-rls-tests.sh   # database security tests (needs Docker running)
 ```
 
 Run a single test file: `npm run test -- path/to/file.test.ts`.
 Run a single test by name: `npm run test -- -t "test name"`.
+
+The **RLS test runner** applies every migration in `supabase/migrations/` to a
+throwaway Postgres container, then runs each `supabase/tests/*_rls.sql` file in
+its own fresh copy of that database. Each check prints `PASS`/`FAIL`, and the
+script exits non-zero on any failure. The stub (`supabase_stub.sql`) mirrors
+Supabase's `auth`/`storage` schemas and its default grants, including the one
+that gives `anon` EXECUTE on new functions.
 
 ## Architecture
 
@@ -158,6 +184,169 @@ maps to a risk level:
 Risk levels drive the `risk-{low,moderate,high,extreme}` Tailwind colors and
 `.risk-badge-*` classes, and color the property markers on the Risk Map
 (thresholds are in `getRiskLevel`, `AssessmentDetail.tsx`).
+
+## Mitigation tracking & the agency workflow
+
+Built to the WFCA Phase 2 MO-5 capability **C5-2**: "Nationwide Integrated
+Mitigation Tracking and Community Resilience Common Operating Portal". The
+flow:
+
+```
+Homeowner                         Agency (inspector / admin / viewer)
+─────────                         ────────────────────────────────────
+assess → recommendations
+track each: To do → Planned →
+  In progress → Done (+ notes,
+  evidence photos)
+Share → Agency: submit ─────────▶ Inspections dashboard (rollups, map, list)
+                                  open the report (read-only)
+                                  Verify a Done item (+ note) ──┐
+"Verified by <agency>" ◀────────────────────────────────────────┘
+                                  review status: New → In review → Closed
+                                  exports (CSV / GeoJSON / PDF)
+                                  fire-exposure check (NIFC perimeters)
+```
+
+### Mitigation tracking (homeowner)
+
+The report's Recommendations section tracks each recommendation:
+`planned → in_progress → completed`, with notes and evidence photos, a
+progress bar, and a count of open *immediate* items.
+- **Storage:** offline-first, one record per (assessment, recommendation) in
+  Dexie `mitigationActions` and the `mitigation_actions` table.
+- **Ids are deterministic** (uuid v5), so two devices converge on one row.
+- **`verified` is third-party only.** The database rejects an owner setting it
+  and locks the row once it's verified. When a verification arrives from the
+  server, it replaces the owner's local copy.
+
+### Organizations, roles & inspector verification
+
+- **Organizations** are fire agencies, local governments, state agencies,
+  insurers or NGOs. Their names are public.
+- **Members** have one of three roles:
+  - `admin` and `inspector` can verify;
+  - `viewer` can only read.
+- **Memberships are provisioned server-side**; there is no self-serve way to
+  become an inspector. Run this in the Supabase SQL editor:
+
+  ```sql
+  insert into public.organizations (name, kind, state_code)
+    values ('Boise Fire Department', 'fire_agency', 'ID') returning id;
+  insert into public.organization_members (organization_id, user_id, role)
+    select '<org id>', id, 'inspector' from auth.users where email = 'inspector@example.gov';
+  ```
+
+- **Submitting:** a homeowner submits an assessment to an organization (Share
+  → Agency). Members of that organization can then **read** it.
+- **Not public:** a submission does not make the report public. Agency
+  submissions are separate from share links.
+- **Withdrawing** a submission removes the organization's access.
+- **Verifying** happens only through the `verify_mitigation_action()` and
+  `revoke_mitigation_verification()` database functions. They check:
+  - the caller's role, and that the assessment was submitted to their
+    organization;
+  - that the item is Done;
+  - that the inspector isn't verifying their own property (conflict of
+    interest).
+
+  The server stamps who verified, for which organization, when, and the note.
+  Only the verifying organization can revoke.
+
+### Agency dashboard (`/inspections`)
+
+Shown only to organization members (`AgencyDashboard.tsx`):
+- **Rollup tiles:** properties, % of mitigations done, verified, awaiting
+  verification, and immediate items outstanding.
+- **Map** of submitted properties, colored by progress: red not started,
+  amber under way, blue all done, green all verified. These are property
+  points; there's no parcel geometry yet.
+- **List** filterable by progress and review status. Inspectors and admins move
+  a submission **New → In review → Closed** (`set_submission_status()`).
+- **Data source:** `agency_dashboard(org)`. It runs with the caller's
+  permissions, so row-level security decides what each person sees. Its counts
+  cover only each assessment's *current* recommendations.
+
+### Reports & exports
+
+- **PDF:** **Print / Save as PDF** on any report (owner, inspector,
+  share-link) and on the dashboard. This is the browser's print dialog, with no
+  PDF library, and it works offline.
+  - `printPage()` loads lazy photos first and prints in the light theme.
+  - Tailwind `print:` variants hide the app chrome and controls.
+- **Dashboard exports** always cover every submission, not the on-screen
+  filters:
+  - **Properties (CSV):** one row per property, with progress counts.
+  - **Mitigation actions (CSV):** one row per recommendation, with status,
+    completed and verified dates, the verifying organization and its note.
+  - **Map points (GeoJSON):** RFC 7946, for ArcGIS or QGIS.
+  - **Exposures (CSV):** see below.
+- **CSV format:** RFC 4180 with a UTF-8 BOM. Text cells that a spreadsheet
+  would run as a formula are neutralised (CSV injection), because addresses and
+  notes are user-entered.
+
+### Fire exposure (effectiveness monitoring)
+
+The dashboard's **Fire exposure** card answers WFCA's KSA-7 requirement,
+"automatic intersection with fire events for evaluation".
+- **The check:** an inspector or admin runs **Check against fire perimeters**.
+  For each located property, the browser asks NIFC's **WFIGS Interagency
+  Perimeters (Year to Date)** service which wildfires contain it or lie within
+  1 km. Prescribed burns are excluded.
+- **Recording:** each hit is saved through `record_fire_exposure()` with a
+  snapshot of the property's mitigation **as of the fire's discovery date**:
+  - **verified at start:** server-stamped, so trustworthy;
+  - **done at start:** the owner's completion dates, so self-reported.
+- **No backdating:** the snapshot is written once, so marking items done after
+  a fire can't improve the record. Re-detection only upgrades "near" to
+  "inside".
+- **Why it's stored:** the year-to-date service resets every January.
+
+## Security model
+
+All data access is enforced in Postgres with row-level security, not in the
+client. Highlights:
+
+- **Owners** read and write only their own properties, assessments, photos,
+  annotations and mitigation actions.
+- **Share links** (`/report/:token`) are bound to their token.
+  - The shared view sends the token in an `x-share-token` header, and
+    `assessment_is_shared()` only matches that token's share.
+  - Share rows can't be listed, and shared assessments can't be enumerated
+    without a token.
+- **Reviewers** (organization members) can only **read** assessments
+  submitted to their organization. All their writes go through security-definer
+  functions that check role and context.
+- **Photo storage:** only the assessment's owner can write under
+  `<assessmentId>/` in the `assessment-photos` bucket. Listing is limited to the
+  owner and reviewers. The bucket is still *public*, so anyone with a photo's
+  exact URL can open it; making it private needs signed URLs and is an open
+  item.
+- **Functions:** new public functions revoke EXECUTE from `anon` explicitly,
+  because Supabase grants it by default.
+
+Every rule above has PASS/FAIL tests in `supabase/tests/`.
+
+## Database migrations & rollout
+
+Migrations live in `supabase/migrations/` and are applied in filename order in
+the Supabase SQL editor (no CLI is set up). The C5 and security work added:
+
+| Migration | Adds |
+| --- | --- |
+| `20261009100000_mitigation_actions` | Mitigation tracking table, owner RLS, usage-view counts |
+| `20261012100000_organizations_inspector_verification` | Organizations, members, submissions, reviewer read policies, verify/revoke functions |
+| `20261012110000_share_token_bound_reads` | Token-bound share-link reads (security fix) |
+| `20261012120000_photo_storage_owner_scoped` | Owner-only photo writes, owner/reviewer listing (security fix) |
+| `20261012130000_verification_functions_revoke_anon` | Removes anon EXECUTE on verify/revoke |
+| `20261012140000_agency_dashboard` | `agency_dashboard()`, `set_submission_status()` |
+| `20261013100000_agency_mitigation_export` | `agency_mitigation_export()` |
+| `20261013110000_fire_exposures` | `fire_exposures` table, `record_fire_exposure()` |
+
+**Rollout order:**
+- **Additive migrations** (new tables and functions): apply the SQL first, then
+  deploy the app.
+- **Migrations that change existing behavior** (the share-link fix): deploy the
+  app first, so the client is ready, then apply the SQL.
 
 ## Risk Map data layers
 
@@ -427,10 +616,26 @@ Two renderers draw the zones, by platform:
 
 WebXR `immersive-ar` is unsupported on iOS (all iOS browsers are WebKit), so
 iPhone/iPad use the compass overlay; Android additionally gets the WebXR
-version. Both project the shared zone polygons onto the ground plane. The
-zone center is currently stamped from the first GPS fix ("stand at the
-structure"); an explicit set/nudge control is planned. See
-[`docs/`](docs/) for the full design rationale.
+version. Both project the shared zone polygons onto the ground plane.
+
+**Stability and calibration.** The approach is ported from the shipped BFMA
+app. `poseFilters.ts` applies:
+- a GPS accuracy gate;
+- heading averaging;
+- in WebXR, anchors that freeze after the first settle-once north alignment.
+
+On-screen controls let the user correct what sensors get wrong:
+- **North ◀/▶** trim (±30°);
+- **Center zones here** / **Center zones at reticle**, to re-center the zones
+  on the structure;
+- **Ground ▲/▼**, a height nudge;
+- **Re-align north** (WebXR).
+
+On Android WebXR there are also:
+- a hit-tested **tape measure** (ft/m);
+- **drop marker at reticle**;
+- depth occlusion where the device supports it;
+- wayfinding chips that point to a selected marker.
 
 ## Auth — DEV_MODE
 
@@ -441,8 +646,13 @@ auth flow.
 ## PWA / offline caching
 
 Configured in `vite.config.ts` via `vite-plugin-pwa` (`registerType:
-'autoUpdate'`). Runtime caches: Mapbox tiles, Supabase responses, images, and
-`.wasm`/`.tflite` model files. Because the service worker auto-updates, a new
+'autoUpdate'`). Runtime caches:
+- Mapbox tiles;
+- Supabase responses;
+- images;
+- models, under `model-cache`: `/ort/` (onnxruntime-web), `/models/`, and
+  `.wasm` / `.onnx` / `.tflite` files;
+- TF.js model shards, under `tfjs-model-cache`. Because the service worker auto-updates, a new
 deploy is picked up on the next reload.
 
 ## Service tiers & costs
@@ -476,6 +686,7 @@ Practical implications:
 - [`docs/USER_GUIDE.md`](docs/USER_GUIDE.md) — illustrated end-user tutorial (with screenshots) for using the app.
 - [`docs/INSPECTION_GUIDELINES.md`](docs/INSPECTION_GUIDELINES.md) — state-by-state record of the guidelines behind the inspection checklist (legal basis, parameters, sources).
 - [`docs/TEST_PLAN.md`](docs/TEST_PLAN.md) — end-user test plan covering every feature.
-- [`docs/SBOM.md`](docs/SBOM.md) — software bill of materials (dependencies, licenses, external data sources).
+- [`docs/SBOM.md`](docs/SBOM.md) — software bill of materials (dependencies, licenses, external data sources, and the open Ultralytics AGPL flag on the detector weights).
+- [`docs/TAXONOMY.md`](docs/TAXONOMY.md) — proposal unifying the detector's 19 object classes with the 11 hazard-condition tags (read before merging labeled data or training).
 - [`docs/legend/`](docs/legend/) — map legend key images used above.
 - `CLAUDE.md` — architecture guide for contributors.
