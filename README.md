@@ -377,12 +377,16 @@ Notes:
   marker, use the Locate button, select a property (below), or open the map
   from an assessment. When the layer is on but nothing is focused yet, it falls
   back to the user's GPS location (or map center if location is denied), so
-  toggling it always shows something. Circles draw instantly, then — once the
-  map settles at zoom 17 — the zones **upgrade to the building's outline**: the
+  toggling it always shows something. Circles draw instantly. Once the map
+  finishes drawing, the zones **upgrade to the building's outline**: the
   Mapbox building footprint under the point is buffered outward 5 / 30 / 100 ft
-  (`@turf/buffer`). Where no footprint exists (rural areas, low zoom, missing
-  map data) the circles remain. The rings are a real 100 ft buffer, so they
-  look small until you zoom in. The zone geometry lives in
+  (`@turf/buffer`). The footprint is read from the rendered map when the base
+  style draws buildings (Street / Terrain, zoom ≥ 15). Otherwise it is fetched
+  from the Mapbox Streets vector tile: on **Satellite**, which has no building
+  layer, and at lower zooms. This is the same lookup the AR view uses
+  (`src/features/maps/utils/footprint.ts`). Where no footprint exists (rural
+  areas, missing map data) the circles remain. The rings are a real 100 ft
+  buffer, so they look small until you zoom in. The zone geometry lives in
   `src/shared/utils/defensibleZones.ts` and is **shared with the AR view** — see
   [Augmented reality](#augmented-reality).
 - **Legend**: a per-layer key (`MapLegend`) shows one card per *visible* layer,

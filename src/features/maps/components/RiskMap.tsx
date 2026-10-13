@@ -38,6 +38,7 @@ import {
   circleZoneFeatures,
   footprintZoneFeatures,
 } from '@/shared/utils/defensibleZones';
+import { findFootprint } from '../utils/footprint';
 import type {
   AnnotationType,
   GeoCoordinates,
@@ -56,34 +57,6 @@ function getRiskLevelFromScore(score: number): RiskLevel {
   if (score >= 6) return 'moderate';
   if (score >= 4) return 'high';
   return 'extreme';
-}
-
-// The Mapbox building footprint rendered under a point, if any. Only returns a
-// result once the building layer is painted (~zoom 15+), so callers query after
-// the map settles.
-function buildingFootprintAt(
-  map: mapboxgl.Map,
-  coords: GeoCoordinates
-): GeoJSON.Feature | null {
-  const p = map.project([coords.longitude, coords.latitude]);
-  const pad = 12; // small pixel box, to catch a footprint the point sits just off
-  let feats;
-  try {
-    feats = map.queryRenderedFeatures([
-      [p.x - pad, p.y - pad],
-      [p.x + pad, p.y + pad],
-    ]);
-  } catch {
-    return null;
-  }
-  const building = feats.find(
-    (f) =>
-      f.sourceLayer === 'building' &&
-      (f.geometry.type === 'Polygon' || f.geometry.type === 'MultiPolygon')
-  );
-  return building
-    ? { type: 'Feature', properties: {}, geometry: building.geometry }
-    : null;
 }
 
 // Swatch colors for the layer toggle list.
@@ -373,24 +346,26 @@ export default function RiskMap({
       // shape once footprints are queryable (after any fly animation settles).
       source.setData({ type: 'FeatureCollection', features: circleZoneFeatures(center) });
 
-      const upgradeToFootprint = () => {
+      const upgradeToFootprint = async () => {
         const map2 = map.current;
         // Bail if a newer selection has superseded this one.
         if (!map2 || zoneCenterRef.current !== center) return;
-        const footprint = buildingFootprintAt(map2, center);
-        if (!footprint) return; // no footprint here — keep the circles
+        const footprint = await findFootprint(map2, center, MAPBOX_TOKEN);
+        // Re-check after the (possible) tile fetch: the selection or the style
+        // may have changed meanwhile.
+        if (!footprint || map.current !== map2 || zoneCenterRef.current !== center) return;
         const zones = footprintZoneFeatures(footprint);
         if (zones.length !== DEFENSIBLE_ZONE_SPECS.length) return;
         const src = map2.getSource('defensible-zones') as mapboxgl.GeoJSONSource | undefined;
         src?.setData({ type: 'FeatureCollection', features: zones });
       };
 
-      // Footprints only paint once the map is idle at a high-enough zoom.
-      if (m.isMoving()) {
-        m.once('idle', upgradeToFootprint);
-      } else {
-        upgradeToFootprint();
-      }
+      // Wait for the map to be idle before reading rendered footprints: after
+      // a fly-to, and also right after a style switch (style.load), when the
+      // new style's buildings haven't been drawn yet. The circle setData above
+      // triggers a render, so 'idle' follows; the explicit repaint guarantees it.
+      m.once('idle', () => void upgradeToFootprint());
+      m.triggerRepaint();
     },
     []
   );
