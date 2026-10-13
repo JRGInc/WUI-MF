@@ -83,6 +83,17 @@ The assessment checklist and recommendation rules are data, not component code: 
 
 The agency dashboard (`AgencyDashboard.tsx`, migration `20261012140000_agency_dashboard.sql`) reads one row per submission from `agency_dashboard(org)`. That function is **SECURITY INVOKER**: the reviewer policies decide visibility, so it adds no access logic of its own. Its mitigation counts cover only the assessment's *current* recommendations, the same rule as `summarizeMitigation`. Rollups and the map's progress bands are pure functions in `agencyRollup.ts`. The map is `components/AgencyMap.tsx` and shows property points, not parcel boundaries. Review status (`submitted → in_review → closed`) changes only through `set_submission_status()`, inspector/admin only. There is deliberately no UPDATE policy on `assessment_submissions`. New public-schema functions must `revoke … from public, anon`: Supabase grants anon EXECUTE explicitly, and the test stub mirrors that.
 
+Exports and printing (WFCA C5-2 "support grant reporting"):
+- **Dashboard exports** come from pure builders in `exports.ts`: properties CSV, a per-recommendation mitigation-actions CSV, and GeoJSON points (RFC 7946, `[lng, lat]`).
+  - The actions CSV reads `agency_mitigation_export(org)` (migration `20261013100000`), an invoker function like `agency_dashboard`.
+  - Field names are snake_case and stable, because downstream templates key on them.
+  - `csvCell` neutralises spreadsheet formulas in text (CSV injection), so keep all CSV output going through it.
+  - Exports always cover every submission, ignoring the on-screen filters.
+- **PDFs are the browser's print dialog** (`printPage()` in `shared/utils/print.ts`); there is no PDF library.
+  - `printPage()` loads lazy images and prints in the light theme.
+  - Use Tailwind `print:` variants to hide chrome; `Layout` already hides the sidebar and top bar.
+  - `AgencyMap` sets `preserveDrawingBuffer` so the map canvas prints.
+
 Provision an organization and inspector (SQL editor / service role):
 
 ```sql

@@ -6,10 +6,12 @@ import {
   MapIcon,
   CameraIcon,
   PencilIcon,
+  PrinterIcon,
 } from '@heroicons/react/24/outline';
 import { shareClient, supabase } from '@/shared/services/supabaseClient';
 import { ShareTokenContext } from '@/shared/services/dataClient';
-import { getLocalAssessment, fromRow } from '@/shared/services/offlineStorage';
+import { getLocalAssessment, getLocalProperty, fromRow } from '@/shared/services/offlineStorage';
+import { printPage } from '@/shared/utils/print';
 import { PhotoGallery } from './components/PhotoGallery';
 import { guidelineProfileById } from './content/guidelines';
 import { LoadingSpinner } from '@/shared/components/LoadingScreen';
@@ -88,6 +90,8 @@ export default function AssessmentDetail() {
         const localAssessment = await getLocalAssessment(id);
         if (localAssessment) {
           setAssessment(localAssessment);
+          // The address heads the report (and its printout).
+          setProperty((await getLocalProperty(localAssessment.propertyId)) ?? null);
         } else {
           // Load from Supabase
           const { data } = await supabase
@@ -143,13 +147,19 @@ export default function AssessmentDetail() {
   return (
     <ShareTokenContext.Provider value={token}>
       <div className="max-w-4xl mx-auto space-y-6">
+        {/* Print-only masthead */}
+        <div className="hidden print:block border-b border-gray-300 pb-2 text-xs text-gray-600">
+          FireRisk wildfire property assessment report · generated{' '}
+          {new Date().toLocaleDateString()}
+        </div>
+
         {/* Header */}
-        <div className="flex items-center justify-between">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-4">
             {!isSharedView && (
               <Link
                 to="/"
-                className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800"
+                className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 print:hidden"
               >
                 <ArrowLeftIcon className="w-5 h-5" />
               </Link>
@@ -198,29 +208,41 @@ export default function AssessmentDetail() {
             </div>
           </div>
 
-          {isReviewer && (
-            <span className="text-xs px-2 py-1 rounded-full bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-200">
-              {verifyAs ? `Reviewing for ${verifyAs.organization.name}` : 'Read-only review'}
-            </span>
-          )}
-          {!readOnlyView && (
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => setShowShareDialog(true)}
-                className="btn-outline flex items-center gap-2"
-              >
-                <ShareIcon className="w-4 h-4" />
-                Share
-              </button>
-              <Link
-                to={`/assessment/${assessment.id}/edit`}
-                className="btn-outline flex items-center gap-2"
-              >
-                <PencilIcon className="w-4 h-4" />
-                Edit
-              </Link>
-            </div>
-          )}
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            {isReviewer && (
+              <span className="text-xs px-2 py-1 rounded-full bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-200 print:hidden">
+                {verifyAs ? `Reviewing for ${verifyAs.organization.name}` : 'Read-only review'}
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={() => void printPage()}
+              className="btn-outline flex items-center gap-2 print:hidden"
+              aria-label="Print or save as PDF"
+            >
+              <PrinterIcon className="w-4 h-4" />
+              <span className="hidden sm:inline">Print / Save as PDF</span>
+              <span className="sm:hidden">PDF</span>
+            </button>
+            {!readOnlyView && (
+              <>
+                <button
+                  onClick={() => setShowShareDialog(true)}
+                  className="btn-outline flex items-center gap-2 print:hidden"
+                >
+                  <ShareIcon className="w-4 h-4" />
+                  Share
+                </button>
+                <Link
+                  to={`/assessment/${assessment.id}/edit`}
+                  className="btn-outline flex items-center gap-2 print:hidden"
+                >
+                  <PencilIcon className="w-4 h-4" />
+                  Edit
+                </Link>
+              </>
+            )}
+          </div>
         </div>
 
         {/* Score Card */}
@@ -259,7 +281,7 @@ export default function AssessmentDetail() {
 
         {/* Quick Actions */}
         {!readOnlyView && (
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-2 gap-4 print:hidden">
             <Link
               to={`/map/${assessment.id}`}
               className="card p-4 hover:border-fire-500 transition-colors"

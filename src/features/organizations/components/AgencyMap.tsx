@@ -35,6 +35,8 @@ export function AgencyMap({ features, onSelect }: AgencyMapProps) {
           : 'mapbox://styles/mapbox/light-v11',
       center: [-98.5, 39.8],
       zoom: 3,
+      // Keep the frame so the map appears when the dashboard is printed.
+      preserveDrawingBuffer: true,
     });
     map.current = m;
     m.addControl(new mapboxgl.NavigationControl({ showCompass: false }), 'top-right');
@@ -108,7 +110,7 @@ export function AgencyMap({ features, onSelect }: AgencyMapProps) {
   return (
     <div
       ref={container}
-      className="h-72 sm:h-96 w-full rounded-lg overflow-hidden"
+      className="h-72 sm:h-96 w-full rounded-lg overflow-hidden print:h-80 break-inside-avoid"
       role="region"
       aria-label="Map of submitted properties coloured by mitigation progress"
     />

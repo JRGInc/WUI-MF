@@ -397,6 +397,10 @@ export async function updateAssessmentLocally(
   }
 }
 
+export async function getLocalProperty(id: string): Promise<Property | undefined> {
+  return db.properties.where('id').equals(id).first();
+}
+
 export async function getLocalAssessment(id: string): Promise<Assessment | undefined> {
   return db.assessments.where('id').equals(id).first();
 }

@@ -221,14 +221,24 @@ function RecommendationRow({
               <span className="font-medium">Inspector note:</span> {action.verificationNote}
             </p>
           )}
-          {review && action && <ReviewActions action={action} review={review} />}
+          {review && action && (
+            <div className="print:hidden">
+              <ReviewActions action={action} review={review} />
+            </div>
+          )}
         </div>
       ) : (
         <>
+          {/* Printed reports show the status, not the controls. */}
+          <span
+            className={`hidden print:inline-flex text-xs px-2 py-0.5 rounded-full ${STATUS_BADGE_CLASS[status]}`}
+          >
+            {STATUS_LABELS[status]}
+          </span>
           <div
             role="group"
             aria-label={`Progress on ${rec.title}`}
-            className="grid grid-cols-4 gap-1 max-w-md"
+            className="grid grid-cols-4 gap-1 max-w-md print:hidden"
           >
             {OWNER_CHOICES.map((choice) => {
               const active = status === choice;
@@ -253,7 +263,7 @@ function RecommendationRow({
           <div className="flex flex-wrap items-center gap-3 text-sm">
             <label
               htmlFor={inputId}
-              className="inline-flex items-center gap-1 cursor-pointer text-fire-600 hover:text-fire-700 dark:text-fire-400"
+              className="inline-flex items-center gap-1 cursor-pointer text-fire-600 hover:text-fire-700 dark:text-fire-400 print:hidden"
             >
               <CameraIcon className="w-4 h-4" aria-hidden="true" />
               Add photo
@@ -280,7 +290,7 @@ function RecommendationRow({
                 setShowNotes((v) => !v);
               }}
               aria-expanded={showNotes}
-              className="text-fire-600 hover:text-fire-700 dark:text-fire-400"
+              className="text-fire-600 hover:text-fire-700 dark:text-fire-400 print:hidden"
             >
               {action?.notes ? 'Edit note' : 'Add note'}
             </button>
@@ -300,7 +310,7 @@ function RecommendationRow({
             <p className="text-sm text-gray-600 dark:text-gray-300">{action.notes}</p>
           )}
           {showNotes && (
-            <div>
+            <div className="print:hidden">
               <label htmlFor={`notes-${rec.id}`} className="sr-only">
                 Note for {rec.title}
               </label>

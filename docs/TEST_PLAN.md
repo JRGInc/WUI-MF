@@ -284,6 +284,21 @@ Same setup as 13a. Use at least two submitted assessments from different homeown
 
 ---
 
+## 13c. Reports & exports
+
+| ID | Test | Steps | Expected |
+|---|---|---|---|
+| EXP-01 | Homeowner PDF | On your own report, tap **Print / Save as PDF** (or Share → **Print / Save as PDF**) and save as PDF. | The PDF has a masthead with the generation date, the address, score, findings, recommendations with their status (as badges, not buttons), notes and photos, including photos below the fold. No sidebar, top bar, buttons or toasts. |
+| EXP-02 | PDF in dark mode | Switch to dark mode, then print. | The PDF is the light theme (readable dark text); the app returns to dark mode after the dialog closes. |
+| EXP-03 | Shared and reviewer PDF | Print from a `/report/:token` link and from an inspector's review. | Same clean report; no owner-only controls. |
+| EXP-04 | Properties CSV | On the agency dashboard, **Properties (CSV)**; open in Excel/Sheets. | One row per submitted property (all of them, regardless of filters); addresses with commas stay in one cell; accented characters display correctly; negative longitudes are numbers. |
+| EXP-05 | Mitigation actions CSV | **Mitigation actions (CSV)**. | One row per recommendation per property with status, completed/verified dates, the verifying organization and the note. Untouched items show `not_started`. Disabled while offline. |
+| EXP-06 | Formula safety | As a homeowner, put `=1+1` in a mitigation note; export the actions CSV as the inspector and open it in Excel. | The cell shows the text `'=1+1` / `=1+1` as text, not `2`. |
+| EXP-07 | GeoJSON | **Map points (GeoJSON)**; load it in QGIS or geojson.io. | Points land on the properties; attributes match the properties CSV; properties without a location are absent. |
+| EXP-08 | Dashboard PDF | **Print / Save as PDF** on the dashboard. | Masthead with the organization and date, tiles, the map (not blank), and the list; no filter chips, export buttons or status buttons. |
+
+---
+
 ## 14. PWA, performance & cross-cutting
 
 | ID | Test | Steps | Expected |

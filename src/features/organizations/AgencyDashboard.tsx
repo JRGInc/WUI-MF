@@ -1,14 +1,23 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { ClipboardDocumentListIcon, ExclamationTriangleIcon } from '@heroicons/react/24/outline';
+import {
+  ArrowDownTrayIcon,
+  ClipboardDocumentListIcon,
+  ExclamationTriangleIcon,
+  PrinterIcon,
+} from '@heroicons/react/24/outline';
 import { LoadingSpinner } from '@/shared/components/LoadingScreen';
 import { useOffline } from '@/app/providers/OfflineProvider';
-import { showErrorToast } from '@/shared/stores/toastStore';
+import { showErrorToast, showSuccessToast } from '@/shared/stores/toastStore';
+import { track } from '@/shared/services/analytics';
+import { downloadTextFile, fileSlug } from '@/shared/utils/download';
+import { printPage } from '@/shared/utils/print';
 import type { AssessmentSubmission } from '@/shared/types';
 import { useMyMembershipsState } from './hooks/useMyMemberships';
 import { VERIFYING_ROLES } from './organizations';
 import {
   fetchAgencyDashboard,
+  fetchAgencyExport,
   setSubmissionStatus,
   VerificationError,
   type AgencyDashboardRow,
@@ -22,6 +31,7 @@ import {
   type ProgressBand,
 } from './agencyRollup';
 import { AgencyMap } from './components/AgencyMap';
+import { actionsCsv, propertiesCsv, propertiesGeoJson } from './exports';
 
 type Status = AssessmentSubmission['status'];
 
@@ -63,6 +73,7 @@ export default function AgencyDashboard() {
   const [statusFilter, setStatusFilter] = useState<Status | 'all'>('all');
   const [bandFilter, setBandFilter] = useState<ProgressBand | 'all'>('all');
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [exporting, setExporting] = useState(false);
 
   // Default to the first organization once memberships load.
   useEffect(() => {
@@ -106,6 +117,41 @@ export default function AgencyDashboard() {
       (bandFilter === 'all' || progressBand(r) === bandFilter)
   );
 
+  // Exports always cover every submission to the organization, not the
+  // on-screen filters, so a grant report can't silently omit properties.
+  type ExportKind = 'properties' | 'actions' | 'geojson';
+  async function exportData(kind: ExportKind) {
+    if (!membership) return;
+    const stem = `${fileSlug(membership.organization.name)}-${
+      kind === 'actions' ? 'mitigation-actions' : 'properties'
+    }-${new Date().toISOString().slice(0, 10)}`;
+    setExporting(true);
+    try {
+      if (kind === 'properties') {
+        downloadTextFile(`${stem}.csv`, propertiesCsv(rows), 'text/csv;charset=utf-8');
+      } else if (kind === 'geojson') {
+        downloadTextFile(
+          `${stem}.geojson`,
+          propertiesGeoJson(rows, {
+            organization: membership.organization.name,
+            generatedAt: new Date().toISOString(),
+          }),
+          'application/geo+json'
+        );
+      } else {
+        const actions = await fetchAgencyExport(membership.organization.id);
+        downloadTextFile(`${stem}.csv`, actionsCsv(actions), 'text/csv;charset=utf-8');
+        showSuccessToast('Export ready', `${actions.length} recommendations exported`);
+      }
+      void track('agency_export', { kind, rows: rows.length });
+    } catch (error) {
+      console.error('Export failed:', error);
+      showErrorToast('Export failed', 'Check your connection and try again.');
+    } finally {
+      setExporting(false);
+    }
+  }
+
   async function changeStatus(row: AgencyDashboardRow, to: Status) {
     setBusyId(row.submissionId);
     try {
@@ -138,6 +184,10 @@ export default function AgencyDashboard() {
 
   return (
     <div className="max-w-6xl mx-auto space-y-6">
+      <div className="hidden print:block border-b border-gray-300 pb-2 text-xs text-gray-600">
+        {membership?.organization.name} · mitigation progress report · generated{' '}
+        {new Date().toLocaleDateString()}
+      </div>
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Inspections</h1>
@@ -147,7 +197,7 @@ export default function AgencyDashboard() {
           </p>
         </div>
         {memberships.length > 1 && (
-          <div>
+          <div className="print:hidden">
             <label htmlFor="org-select" className="sr-only">
               Organization
             </label>
@@ -183,6 +233,35 @@ export default function AgencyDashboard() {
         </div>
       ) : (
         <>
+          {/* Exports (grant reporting / GIS) */}
+          <div className="flex flex-wrap items-center gap-2 print:hidden" role="group" aria-label="Export">
+            <span className="text-sm text-gray-500 dark:text-gray-400 mr-1">Export all:</span>
+            <ExportButton disabled={exporting || rows.length === 0} onClick={() => void exportData('properties')}>
+              Properties (CSV)
+            </ExportButton>
+            <ExportButton
+              disabled={exporting || rows.length === 0 || !isOnline}
+              onClick={() => void exportData('actions')}
+              title={isOnline ? undefined : 'Connect to the internet to export mitigation actions'}
+            >
+              Mitigation actions (CSV)
+            </ExportButton>
+            <ExportButton
+              disabled={exporting || rows.length - rollup.unmapped === 0}
+              onClick={() => void exportData('geojson')}
+            >
+              Map points (GeoJSON)
+            </ExportButton>
+            <button
+              type="button"
+              onClick={() => void printPage()}
+              className="btn-outline text-sm inline-flex items-center gap-1"
+            >
+              <PrinterIcon className="w-4 h-4" aria-hidden="true" />
+              Print / Save as PDF
+            </button>
+          </div>
+
           {/* Rollups */}
           <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
             <Tile label="Properties" value={rollup.properties} sub={`${rollup.byStatus.submitted} new · ${rollup.byStatus.in_review} in review`} />
@@ -203,7 +282,7 @@ export default function AgencyDashboard() {
 
           {/* Map */}
           <div className="card p-4 space-y-3">
-            <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Filter by progress">
+            <div className="flex flex-wrap items-center gap-2 print:hidden" role="group" aria-label="Filter by progress">
               <FilterChip active={bandFilter === 'all'} onClick={() => setBandFilter('all')}>
                 All ({rows.length})
               </FilterChip>
@@ -233,7 +312,7 @@ export default function AgencyDashboard() {
           {/* List */}
           <div className="card">
             <div
-              className="flex flex-wrap gap-2 px-4 py-3 border-b border-gray-200 dark:border-gray-700"
+              className="flex flex-wrap gap-2 px-4 py-3 border-b border-gray-200 dark:border-gray-700 print:hidden"
               role="group"
               aria-label="Filter by review status"
             >
@@ -287,7 +366,7 @@ export default function AgencyDashboard() {
                         {STATUS_LABELS[row.submissionStatus]}
                       </span>
                       {canAct && (
-                        <div className="flex gap-2">
+                        <div className="flex gap-2 print:hidden">
                           {NEXT_ACTIONS[row.submissionStatus].map((a) => (
                             <button
                               key={a.to}
@@ -310,6 +389,31 @@ export default function AgencyDashboard() {
         </>
       )}
     </div>
+  );
+}
+
+function ExportButton({
+  disabled,
+  onClick,
+  title,
+  children,
+}: {
+  disabled: boolean;
+  onClick: () => void;
+  title?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onClick}
+      title={title}
+      className="btn-outline text-sm inline-flex items-center gap-1 disabled:opacity-50"
+    >
+      <ArrowDownTrayIcon className="w-4 h-4" aria-hidden="true" />
+      {children}
+    </button>
   );
 }
 

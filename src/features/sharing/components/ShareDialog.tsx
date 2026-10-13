@@ -24,6 +24,7 @@ import {
   submissionChoices,
 } from '@/features/organizations/organizations';
 import type { AssessmentSubmission, ShareType } from '@/shared/types';
+import { printPage } from '@/shared/utils/print';
 
 interface ShareDialogProps {
   assessmentId: string;
@@ -154,22 +155,11 @@ export function ShareDialog({ assessmentId, stateCode, onClose }: ShareDialogPro
     }
   };
 
-  const downloadPDF = async () => {
-    setIsLoading(true);
-    try {
-      // In production, this would call a PDF generation endpoint
-      showSuccessToast('Download started', 'Your PDF report is being generated');
-
-      // Simulate PDF generation
-      setTimeout(() => {
-        showSuccessToast('PDF Ready', 'Your report has been downloaded');
-        setIsLoading(false);
-      }, 2000);
-    } catch (error) {
-      console.error('Error generating PDF:', error);
-      showErrorToast('Failed to generate PDF');
-      setIsLoading(false);
-    }
+  // Close the dialog first so it isn't in the printout, then print the report
+  // underneath (the browser's "Save as PDF").
+  const downloadPDF = () => {
+    onClose();
+    setTimeout(() => void printPage(), 300);
   };
 
   return (
@@ -412,7 +402,7 @@ export function ShareDialog({ assessmentId, stateCode, onClose }: ShareDialogPro
                     className="btn-outline w-full flex items-center justify-center gap-2"
                   >
                     <DocumentArrowDownIcon className="w-4 h-4" />
-                    Download PDF Report
+                    Print / Save as PDF
                   </button>
                 </div>
               </Dialog.Panel>

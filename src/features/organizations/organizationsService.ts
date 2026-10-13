@@ -150,3 +150,50 @@ export async function setSubmissionStatus(
   if (error) throw new VerificationError(verificationErrorMessage(error));
   return submissionFromRow(data as Record<string, unknown>);
 }
+
+export interface AgencyExportRow {
+  submissionId: string;
+  assessmentId: string;
+  submissionStatus: AssessmentSubmission['status'];
+  address: string;
+  parcelId?: string;
+  recommendationId: string;
+  title: string;
+  category: string;
+  priority: string;
+  /** A MitigationStatus, or 'not_started' when there is no record. */
+  status: string;
+  ownerNotes?: string;
+  evidencePhotos: number;
+  completedAt?: string;
+  verifiedAt?: string;
+  verifierOrganization?: string;
+  verificationNote?: string;
+}
+
+/** One row per current recommendation on each submitted assessment (grant reporting). */
+export async function fetchAgencyExport(organizationId: string): Promise<AgencyExportRow[]> {
+  const { data, error } = await supabase.rpc('agency_mitigation_export', {
+    p_organization_id: organizationId,
+  });
+  if (error) throw error;
+  const opt = (v: unknown) => (v === null || v === undefined ? undefined : String(v));
+  return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
+    submissionId: r.submission_id as string,
+    assessmentId: r.assessment_id as string,
+    submissionStatus: r.submission_status as AssessmentSubmission['status'],
+    address: r.address as string,
+    parcelId: opt(r.parcel_id),
+    recommendationId: r.recommendation_id as string,
+    title: (r.title as string | null) ?? '',
+    category: (r.category as string | null) ?? '',
+    priority: (r.priority as string | null) ?? '',
+    status: r.status as string,
+    ownerNotes: opt(r.owner_notes),
+    evidencePhotos: Number(r.evidence_photos),
+    completedAt: opt(r.completed_at),
+    verifiedAt: opt(r.verified_at),
+    verifierOrganization: opt(r.verifier_organization),
+    verificationNote: opt(r.verification_note),
+  }));
+}
